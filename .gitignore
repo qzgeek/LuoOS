@@ -10,8 +10,6 @@ classes/
 # idea
 
 .idea/
-.gemini/
-.proxyai/
 *.iml
 *.ipr
 *.iws

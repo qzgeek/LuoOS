@@ -1,3 +1,5 @@
+import java.util.Properties
+
 plugins {
     id("java")
     id("java-library")
@@ -17,7 +19,39 @@ allprojects {
     }
 }
 
-val minecraftVersion = property("minecraft_version").toString()
+val localVersionProperties = Properties().apply {
+    val propertiesFile = project.layout.projectDirectory.file("gradle.properties").asFile
+    if (propertiesFile.isFile) {
+        propertiesFile.inputStream().use { load(it) }
+    }
+}
+
+val versionPlaceholder = "[VERSION" + "ED]"
+
+localVersionProperties.forEach { key, value ->
+    if (key is String && value is String && value != versionPlaceholder) {
+        extensions.extraProperties[key] = value
+    }
+}
+
+fun versionedProperty(name: String): String {
+    val localValue = localVersionProperties.getProperty(name)
+    if (!localValue.isNullOrBlank() && localValue != versionPlaceholder) {
+        return localValue
+    }
+
+    val gradleValue = findProperty(name)?.toString()
+    if (!gradleValue.isNullOrBlank() && gradleValue != versionPlaceholder) {
+        return gradleValue
+    }
+
+    throw GradleException(
+        "Versioned property '$name' is unresolved for project ${project.path}. " +
+                "Check ${project.projectDir.resolve("gradle.properties")}."
+    )
+}
+
+val minecraftVersion = versionedProperty("minecraft_version")
 val isMinecraft26Plus = minecraftVersion.substringBefore('.').toIntOrNull()?.let { it >= 26 } == true
 
 if (isMinecraft26Plus) {
@@ -51,13 +85,12 @@ repositories {
     maven(url = "https://oss.sonatype.org/content/repositories/snapshots")
 }
 
-val supportedVersionsForArtifact = property("supported_versions")
-    .toString()
+val supportedVersionsForArtifact = versionedProperty("supported_versions")
     .split(",")
     .map(String::trim)
     .filter(String::isNotEmpty)
 val minecraftVersionLabel = when (supportedVersionsForArtifact.size) {
-    0 -> property("minecraft_version").toString()
+    0 -> minecraftVersion
     1 -> supportedVersionsForArtifact.first()
     else -> "${supportedVersionsForArtifact.first()}-${supportedVersionsForArtifact.last()}"
 }
@@ -113,17 +146,17 @@ afterEvaluate {
 
 dependencies {
     // Fabric
-    add("minecraft", "com.mojang:minecraft:${property("minecraft_version")}")
+    add("minecraft", "com.mojang:minecraft:$minecraftVersion")
     if (!isMinecraft26Plus) {
         add("mappings", project.extensions.getByType<net.fabricmc.loom.api.LoomGradleExtensionAPI>().officialMojangMappings())
     }
 
     if (isMinecraft26Plus) {
-        add("implementation", "net.fabricmc:fabric-loader:${property("loader_version")}")
-        add("implementation", "net.fabricmc.fabric-api:fabric-api:${property("fabric_version")}")
+        add("implementation", "net.fabricmc:fabric-loader:${versionedProperty("loader_version")}")
+        add("implementation", "net.fabricmc.fabric-api:fabric-api:${versionedProperty("fabric_version")}")
     } else {
-        add("modImplementation", "net.fabricmc:fabric-loader:${property("loader_version")}")
-        add("modImplementation", "net.fabricmc.fabric-api:fabric-api:${property("fabric_version")}")
+        add("modImplementation", "net.fabricmc:fabric-loader:${versionedProperty("loader_version")}")
+        add("modImplementation", "net.fabricmc.fabric-api:fabric-api:${versionedProperty("fabric_version")}")
     }
     
     // Mixin Extras for advanced mixin features
@@ -134,8 +167,8 @@ dependencies {
         add("include", "io.github.llamalad7:mixinextras-fabric:0.4.1")
     }
 
-    add("implementation", "org.xerial:sqlite-jdbc:${property("sqlite_version")}")
-    add("include", "org.xerial:sqlite-jdbc:${property("sqlite_version")}")
+    add("implementation", "org.xerial:sqlite-jdbc:${versionedProperty("sqlite_version")}")
+    add("include", "org.xerial:sqlite-jdbc:${versionedProperty("sqlite_version")}")
 }
 
 tasks.jar {
@@ -189,7 +222,7 @@ tasks.processResources {
                 "mod_homepage" to modHomepage,
                 "mod_sources" to modSources,
                 "mod_issues" to modIssues,
-                "supported_minecraft_version" to project.property("supported_minecraft_version")
+                "supported_minecraft_version" to versionedProperty("supported_minecraft_version")
             )
         )
         filter {
@@ -242,14 +275,14 @@ publishMods {
     }
     dryRun.set(true) // Disabled by default - set your own project IDs
 
-    displayName.set("${modName} ${property("display_name")} $dynamicVersion")
+    displayName.set("${modName} ${versionedProperty("display_name")} $dynamicVersion")
     version.set(dynamicVersion)
 
     changelog.set(rootProject.file("RELEASE_NOTE.md").takeIf { it.isFile }?.readText() ?: "")
     type.set(STABLE)
     modLoaders.add("fabric")
 
-    val targets = property("supported_versions").toString().split(",")
+    val targets = versionedProperty("supported_versions").split(",")
 
     modrinth {
         projectId = "YOUR_MODRINTH_PROJECT_ID" // Replace with your project ID
