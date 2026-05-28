@@ -1,0 +1,48 @@
+name: ${mod_id}
+version: ${version}
+main: heos.folia.HeosFoliaPlugin
+api-version: '${api_version}'
+folia-supported: true
+author: ${mod_author}
+website: ${mod_homepage}
+description: ${mod_description}
+commands:
+  login:
+    aliases: [l]
+    description: Log in to your Heos account
+    usage: /login <password>
+  register:
+    aliases: [reg]
+    description: Register your Heos account
+    usage: /register <password> <confirmPassword>
+  changepassword:
+    aliases: [changepw]
+    description: Change your Heos password
+    usage: /changepassword <oldPassword> <newPassword>
+  ban:
+    description: Ban a player
+    usage: /ban <player> [time] [reason]
+    permission: heos.admin
+  ban-ip:
+    description: Ban an IP address
+    usage: /ban-ip <ip> [time] [reason]
+    permission: heos.admin
+  unban:
+    description: Unban a player or IP
+    usage: /unban <player|ip>
+    permission: heos.admin
+  unban-ip:
+    description: Unban an IP address
+    usage: /unban-ip <ip>
+    permission: heos.admin
+  banlist:
+    description: Show Heos bans
+    usage: /banlist
+    permission: heos.admin
+  heos:
+    description: Heos administration
+    usage: /heos <login|register|changepassword|ban|ban-ip|unban|unban-ip|banlist|resetpassword|info|whitelist|migrate|reload>
+    permission: heos.admin
+permissions:
+  heos.admin:
+    default: op

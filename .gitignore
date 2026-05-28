@@ -1,0 +1,36 @@
+# gradle
+
+remapped/
+
+.gradle/
+build/
+out/
+classes/
+
+# idea
+
+.idea/
+.gemini/
+.proxyai/
+*.iml
+*.ipr
+*.iws
+
+# vscode
+
+.settings/
+.vscode/
+bin/
+.classpath
+.project
+
+# fabric
+
+run/
+/versions/*/src/
+
+# local server data
+server/heos/
+**/server/heos/
+**/heos/secret.key
+**/heos/player_data.db*

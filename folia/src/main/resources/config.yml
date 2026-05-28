@@ -1,0 +1,77 @@
+# 是否启用登录/注册认证。关闭后玩家无需使用 /login 或 /register。
+enableAuthentication: true
+
+# 语言文件代码，例如 zh_cn 或 en_us。多数提示文本会从对应语言文件读取。
+language: zh_cn
+
+# 在线模式服务器中是否允许非正版玩家进入。关闭后只允许通过正版验证的玩家进入。
+# 允许的离线玩家名称格式：A-Z、a-z、0-9、_、+、-、.，长度 3-16。
+allowOfflinePlayers: true
+
+# 允许离线玩家名称使用更多常规网站用户名字符，例如中文、其他语言字母和数字。
+# 关闭后仅允许 A-Z、a-z、0-9、_、+、-、.，长度仍为 3-16。
+allowMoreOfflineUsernameCharacters: true
+
+# 是否分离同名正版账号和离线账号的 Heos 登录数据，避免账号类型切换时覆盖注册信息。
+separateOnlineOfflineAccounts: true
+
+# 是否拦截无命名空间前缀的 login/register/changepassword 等命令。
+enableUnprefixedCommandHijack: true
+
+# 玩家进入服务器后必须完成登录/注册的时间限制，单位为秒。
+loginTimeout: 60
+
+# 未登录玩家收到登录/注册提醒的间隔，单位为秒。
+loginReminderSeconds: 10
+
+# 注册密码允许的最短长度。
+minPasswordLength: 4
+
+# 注册密码允许的最长长度。
+maxPasswordLength: 32
+
+# 是否在玩家列表页脚显示服务器 TPS 信息。
+enableAutoLogTps: true
+
+# TPS 信息刷新间隔，单位为 tick。20 tick 约等于 1 秒。
+autoLogTpsDelayTicks: 20
+
+# 是否启用配方查看器同步。仅在支持的 Minecraft 版本上生效。
+enableRecipeViewerSync: true
+
+# 是否启用 Heos 自带白名单检查。
+enableWhitelist: false
+
+# 是否启用 Heos 自带封禁系统和封禁命令。
+enableCustomBan: true
+
+# 是否启用离线/正版玩家数据迁移功能。只在需要迁移玩家数据时开启。
+enablePlayerDataMigration: false
+
+# 数据迁移期间临时阻止相关玩家登录的时间，单位为秒。
+migrationBanSeconds: 30
+
+# 同一个 IP 最多允许同时在线的玩家数量。-1 表示不限制。
+maxConcurrentSessionsPerIp: -1
+
+# 同 IP 在线数量超过 maxConcurrentSessionsPerIp 时踢出玩家显示的消息。
+# 这是管理员可自定义文案，不会自动跟随语言文件。
+sessionLimitKickMessage: The online session limit for this IP has been reached
+
+# 是否在同一用户名连续登录失败过多时临时锁定该用户名。
+enableUsernameLoginFailureLock: true
+
+# 触发用户名临时锁定前允许的连续失败次数。
+usernameLoginFailureLimit: 5
+
+# 用户名触发失败锁定后的持续时间，单位为秒。
+usernameLoginFailureLockSeconds: 30
+
+# 是否在同一 IP 连续登录失败过多时临时锁定该 IP。
+enableIpLoginFailureLock: false
+
+# 触发 IP 临时锁定前允许的连续失败次数。
+ipLoginFailureLimit: 10
+
+# IP 触发失败锁定后的持续时间，单位为秒。
+ipLoginFailureLockSeconds: 30
