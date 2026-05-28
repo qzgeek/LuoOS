@@ -5,7 +5,7 @@ package heos;
 public final class Heosmod {
     public static final String MOD_ID = "heos";
     public static final String MOD_NAME = "Heos Mod";
-    public static final String MOD_VERSION = "0.07";
+    public static final String MOD_VERSION = "0.06";
     public static final String MOD_DESCRIPTION = "os";
     public static final String MOD_AUTHOR = "chara201x, chatgpt, claude";
     public static final String MOD_LICENSE = "MIT";
