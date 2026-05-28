@@ -21,6 +21,7 @@ stonecutter {
 
 val foliaVersions = listOf("1.20.1", "1.20.2", "1.20.4", "1.20.6", "1.21.4", "1.21.5", "1.21.6", "1.21.8", "1.21.11", "26.1", "26.1.1", "26.1.2")
 foliaVersions.forEach { version ->
+    val versionDir = file("folia/versions/$version").also { it.mkdirs() }
     include("folia:$version")
-    project(":folia:$version").projectDir = file("folia/versions/$version")
+    project(":folia:$version").projectDir = versionDir
 }
