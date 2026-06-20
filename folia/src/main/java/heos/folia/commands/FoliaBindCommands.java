@@ -101,7 +101,7 @@ public final class FoliaBindCommands implements CommandExecutor, TabCompleter {
     }
 
     private void list(CommandSender sender) {
-        if (!sender.hasPermission("heos.admin")) { sender.sendMessage(ChatColor.RED + "Permission denied."); return; }
+        if (!sender.hasPermission("luoos.admin")) { sender.sendMessage(ChatColor.RED + "Permission denied."); return; }
         List<FoliaStorage.BindingEntry> all = storage.listAllBindings();
         if (all.isEmpty()) { sender.sendMessage(ChatColor.YELLOW + "No bindings."); return; }
         sender.sendMessage(ChatColor.YELLOW + FoliaMessages.bindHeader());
@@ -116,7 +116,7 @@ public final class FoliaBindCommands implements CommandExecutor, TabCompleter {
     }
 
     private void revoke(CommandSender sender, String[] args) {
-        if (!sender.hasPermission("heos.admin")) { sender.sendMessage(ChatColor.RED + "Permission denied."); return; }
+        if (!sender.hasPermission("luoos.admin")) { sender.sendMessage(ChatColor.RED + "Permission denied."); return; }
         if (args.length < 2) { sender.sendMessage(ChatColor.RED + FoliaMessages.bindUsageRevoke()); return; }
         try {
             String idStr = args[1].startsWith("#") ? args[1].substring(1) : args[1];
@@ -130,14 +130,16 @@ public final class FoliaBindCommands implements CommandExecutor, TabCompleter {
     }
 
     private void showHelp(Player player) {
-        player.sendMessage(ChatColor.YELLOW + "=== HEOS 账号绑定 ===");
-        player.sendMessage(ChatColor.WHITE + "/heos bind request <被绑定账号>" + ChatColor.GRAY + " - 请求绑定");
-        player.sendMessage(ChatColor.WHITE + "/heos bind accept <绑定账号>" + ChatColor.GRAY + " - 同意绑定");
-        player.sendMessage(ChatColor.WHITE + "/heos bind deny <绑定账号>" + ChatColor.GRAY + " - 拒绝绑定");
-        player.sendMessage(ChatColor.WHITE + "/heos bind status" + ChatColor.GRAY + " - 查看待处理");
-        if (player.hasPermission("heos.admin")) {
-            player.sendMessage(ChatColor.WHITE + "/heos bind list" + ChatColor.GRAY + " - 所有绑定");
-            player.sendMessage(ChatColor.WHITE + "/heos bind revoke <ID>" + ChatColor.GRAY + " - 撤销绑定");
+        player.sendMessage(ChatColor.YELLOW + "=== LuoOS 账号绑定 ===");
+        player.sendMessage(ChatColor.WHITE + "/los bind request <被绑定账号>" + ChatColor.GRAY + " - 请求绑定");
+        player.sendMessage(ChatColor.WHITE + "/los bind accept <绑定账号>" + ChatColor.GRAY + " - 同意绑定");
+        player.sendMessage(ChatColor.WHITE + "/los bind deny <绑定账号>" + ChatColor.GRAY + " - 拒绝绑定");
+        player.sendMessage(ChatColor.WHITE + "/los bind status" + ChatColor.GRAY + " - 查看待处理");
+        player.sendMessage(ChatColor.WHITE + "/los bind tui" + ChatColor.GRAY + " - 交互式管理");
+        player.sendMessage(ChatColor.WHITE + "/los bind gui" + ChatColor.GRAY + " - 箱子界面管理");
+        if (player.hasPermission("luoos.admin")) {
+            player.sendMessage(ChatColor.WHITE + "/los bind list" + ChatColor.GRAY + " - 所有绑定");
+            player.sendMessage(ChatColor.WHITE + "/los bind revoke <ID>" + ChatColor.GRAY + " - 撤销绑定");
         }
     }
 

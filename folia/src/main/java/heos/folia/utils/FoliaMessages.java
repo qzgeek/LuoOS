@@ -292,6 +292,10 @@ public final class FoliaMessages {
         return translate("text.heos.bindTargetIsBound");
     }
 
+    public static String bindTargetIsBoundRequest(String targetName) {
+        return translate("text.heos.bindTargetIsBoundRequest").formatted(targetName);
+    }
+
     public static String bindGroupOnline(String playerName) {
         return translate("text.heos.bindGroupOnline").formatted(playerName);
     }

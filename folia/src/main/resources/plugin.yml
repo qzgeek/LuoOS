@@ -9,42 +9,42 @@ description: ${mod_description}
 commands:
   login:
     aliases: [l]
-    description: Log in to your Heos account
+    description: Log in to your LuoOS account
     usage: /login <password>
   register:
     aliases: [reg]
-    description: Register your Heos account
+    description: Register your LuoOS account
     usage: /register <password> <confirmPassword>
   changepassword:
     aliases: [changepw]
-    description: Change your Heos password
+    description: Change your LuoOS password
     usage: /changepassword <oldPassword> <newPassword>
   ban:
     description: Ban a player
     usage: /ban <player> [time] [reason]
-    permission: heos.admin
+    permission: luoos.admin
   ban-ip:
     description: Ban an IP address
     usage: /ban-ip <ip> [time] [reason]
-    permission: heos.admin
+    permission: luoos.admin
   unban:
     description: Unban a player or IP
     usage: /unban <player|ip>
-    permission: heos.admin
+    permission: luoos.admin
   unban-ip:
     description: Unban an IP address
     usage: /unban-ip <ip>
-    permission: heos.admin
+    permission: luoos.admin
   banlist:
-    description: Show Heos bans
+    description: Show LuoOS bans
     usage: /banlist
-    permission: heos.admin
-  heos:
-    description: Heos administration
-    usage: /heos <login|register|changepassword|ban|ban-ip|unban|unban-ip|banlist|resetpassword|info|whitelist|migrate|reload|bind>
-    permission: heos.admin
+    permission: luoos.admin
+  los:
+    description: LuoOS administration
+    usage: /los <login|register|changepassword|ban|ban-ip|unban|unban-ip|banlist|resetpassword|info|whitelist|migrate|reload|bind>
+    permission: luoos.admin
 permissions:
-  heos.admin:
-    default: true
-  heos.bind:
+  luoos.admin:
+    default: op
+  luoos.bind:
     default: true

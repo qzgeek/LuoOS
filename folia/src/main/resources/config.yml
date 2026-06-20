@@ -1,111 +1,161 @@
-# HEOS Folia Configuration
-# 
-# Account Binding: Allows players to link new accounts (online/offline) to old ones.
-# When bound, the new account UUID is transparently remapped to the old UUID,
-# so all server data and plugins see the original identity.
-#
-# Name Prefix: When online and offline accounts share the same username,
-# the display name gets a prefix (e.g. "正版_Player1", "离线_Player1").
+# LuoOS Folia Configuration / LuoOS Folia 配置
+# https://github.com/qzgeek/heos-public (forked from chara2015/heos-public)
 
-# --- Authentication ---
+# =============================================================================
+# Authentication / 登录认证
+# =============================================================================
+
 # Whether to enable login/register authentication.
 # When disabled, players do not need /login or /register.
+# 是否启用登录/注册认证。关闭后玩家无需使用 /login 或 /register。
 enableAuthentication: true
 
 # Language file code, e.g. zh_cn or en_us.
+# 语言文件代码，例如 zh_cn 或 en_us。
 language: zh_cn
 
 # Allow offline (non-premium) players to join an online-mode server.
 # When enabled, offline players bypass Mojang validation.
+# 在线模式服务器中是否允许非正版玩家进入。启用后离线玩家将绕过 Mojang 验证。
 allowOfflinePlayers: true
 
 # Allow offline usernames with extended character sets (Chinese, combining marks, etc.)
 # When false, only [a-zA-Z0-9_+-.] are allowed.
+# 允许离线玩家名称使用更多字符（中文、组合标记等）。关闭后仅允许 [a-zA-Z0-9_+-.]。
 allowMoreOfflineUsernameCharacters: true
 
 # Separate online/premium and offline account data.
 # When enabled, the same username can have both a premium and an offline data entry.
 # They are distinguished by UUID.
+# 是否分离同名正版账号和离线账号的登录数据。启用后同名正版和离线账号数据独立，按 UUID 区分。
 separateOnlineOfflineAccounts: true
 
-# Intercept unprefixed (no namespace) login/register/changepassword commands.
+# Intercept unprefixed login/register/changepassword commands.
+# 是否拦截无命名空间前缀的 login/register/changepassword 等命令。
 enableUnprefixedCommandHijack: true
 
 # Time limit (seconds) for a player to login/register after joining.
+# 玩家进入服务器后必须完成登录/注册的时间限制，单位为秒。
 loginTimeout: 60
 
-# Reminder interval (seconds) to remind unauthenticated players to login/register.
+# Reminder interval (seconds) to remind unauthenticated players.
+# 未登录玩家收到登录/注册提醒的间隔，单位为秒。
 loginReminderSeconds: 10
 
 # Minimum password length for registration.
+# 注册密码允许的最短长度。
 minPasswordLength: 4
 
 # Maximum password length for registration.
+# 注册密码允许的最长长度。
 maxPasswordLength: 32
 
-# --- Account Binding ---
-# Whether to enable the account binding system (/heos bind ...).
+# =============================================================================
+# Account Binding / 账号绑定
+# =============================================================================
+
+# Whether to enable the account binding system (/los bind ...).
+# 是否启用账号绑定系统（/los bind ...）。
 enableAccountBinding: true
 
 # Storage backend for binding data: "sqlite" (default) or "mysql".
+# 绑定数据存储后端："sqlite"（默认）或 "mysql"。
 bindingStorage: sqlite
 
 # MySQL connection (only used when bindingStorage is "mysql").
+# MySQL 连接（仅 bindingStorage 为 "mysql" 时使用）。
 #mysql:
-#  url: jdbc:mysql://localhost:3306/heos
-#  user: heos
+#  url: jdbc:mysql://localhost:3306/luoos
+#  user: luoos
 #  password: changeme
 
-# --- TPS Display ---
+# =============================================================================
+# TPS Display / TPS 显示
+# =============================================================================
+
 # Whether to show TPS in the player list footer.
+# 是否在玩家列表页脚显示服务器 TPS 信息。
 enableAutoLogTps: true
 
 # TPS refresh interval in ticks (20 ticks = 1 second).
+# TPS 信息刷新间隔，单位为 tick。20 tick 约等于 1 秒。
 autoLogTpsDelayTicks: 20
 
-# --- Recipe Viewer Sync ---
+# =============================================================================
+# Recipe Viewer Sync / 配方查看器同步
+# =============================================================================
+
 # Sync server recipe data to client recipe viewers (JEI/REI).
 # Only works on Minecraft 1.21.2+.
+# 同步服务端配方数据给 JEI/REI 等客户端配方查看器。仅 1.21.2+ 生效。
 enableRecipeViewerSync: true
 
-# --- Whitelist ---
-# Whether to enable the HEOS built-in whitelist.
+# =============================================================================
+# Whitelist / 白名单
+# =============================================================================
+
+# Whether to enable the LuoOS built-in whitelist.
+# 是否启用 LuoOS 自带白名单检查。
 enableWhitelist: false
 
-# --- Ban System ---
-# Whether to enable the HEOS custom ban system.
+# =============================================================================
+# Ban System / 封禁系统
+# =============================================================================
+
+# Whether to enable the LuoOS custom ban system.
+# 是否启用 LuoOS 自带封禁系统和封禁命令。
 enableCustomBan: true
 
-# --- Player Data Migration ---
+# =============================================================================
+# Player Data Migration / 玩家数据迁移
+# =============================================================================
+
 # Whether to enable player data migration.
 # Only enable when you need to migrate player data.
+# 是否启用离线/正版玩家数据迁移功能。只在需要迁移玩家数据时开启。
 enablePlayerDataMigration: false
 
 # Temporary ban duration (seconds) for players during data migration.
+# 数据迁移期间临时阻止相关玩家登录的时间，单位为秒。
 migrationBanSeconds: 30
 
-# --- Session Limits ---
+# =============================================================================
+# Session Limits / 会话限制
+# =============================================================================
+
 # Maximum concurrent sessions from the same IP. -1 = no limit.
+# 同一个 IP 最多允许同时在线的玩家数量。-1 表示不限制。
 maxConcurrentSessionsPerIp: -1
 
 # Kick message when the session limit is exceeded.
+# This is a custom admin message, it does NOT auto-follow language files.
+# 同 IP 在线数量超过限制时踢出玩家显示的消息。管理员可自定义，不会自动跟随语言文件。
 sessionLimitKickMessage: The online session limit for this IP has been reached
 
-# --- Login Failure Protection ---
+# =============================================================================
+# Login Failure Protection / 登录失败保护
+# =============================================================================
+
 # Temporarily lock a username after too many failed login attempts.
+# 是否在同一用户名连续登录失败过多时临时锁定该用户名。
 enableUsernameLoginFailureLock: true
 
 # Number of failed attempts before locking the username.
+# 触发用户名临时锁定前允许的连续失败次数。
 usernameLoginFailureLimit: 5
 
 # Lock duration (seconds) for the username.
+# 用户名触发失败锁定后的持续时间，单位为秒。
 usernameLoginFailureLockSeconds: 30
 
 # Temporarily lock an IP after too many failed login attempts.
+# 是否在同一 IP 连续登录失败过多时临时锁定该 IP。
 enableIpLoginFailureLock: false
 
 # Number of failed attempts before locking the IP.
+# 触发 IP 临时锁定前允许的连续失败次数。
 ipLoginFailureLimit: 10
 
 # Lock duration (seconds) for the IP.
+# IP 触发失败锁定后的持续时间，单位为秒。
 ipLoginFailureLockSeconds: 30

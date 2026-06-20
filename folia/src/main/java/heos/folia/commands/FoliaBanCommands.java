@@ -33,7 +33,7 @@ public final class FoliaBanCommands implements CommandExecutor, TabCompleter {
 
     @Override
     public boolean onCommand(CommandSender sender, Command command, String label, String[] args) {
-        if (!sender.hasPermission("heos.admin")) {
+        if (!sender.hasPermission("luoos.admin")) {
             sender.sendMessage(ChatColor.RED + "You do not have permission");
             return true;
         }
@@ -41,7 +41,7 @@ public final class FoliaBanCommands implements CommandExecutor, TabCompleter {
     }
 
     public boolean onSubcommand(CommandSender sender, String subcommand, String[] args) {
-        if (!sender.hasPermission("heos.admin")) {
+        if (!sender.hasPermission("luoos.admin")) {
             sender.sendMessage(ChatColor.RED + "You do not have permission");
             return true;
         }
@@ -212,7 +212,7 @@ public final class FoliaBanCommands implements CommandExecutor, TabCompleter {
 
     @Override
     public List<String> onTabComplete(CommandSender sender, Command command, String alias, String[] args) {
-        if (!sender.hasPermission("heos.admin")) {
+        if (!sender.hasPermission("luoos.admin")) {
             return Collections.emptyList();
         }
         if (args.length == 1 && (command.getName().equalsIgnoreCase("ban") || command.getName().equalsIgnoreCase("unban"))) {

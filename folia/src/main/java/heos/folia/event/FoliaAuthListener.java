@@ -123,8 +123,8 @@ public final class FoliaAuthListener implements Listener {
         if (!authService.isAuthenticationEnabled()) {
             return;
         }
-        if (!event.getPlayer().hasPermission("heos.admin")) {
-            event.getCommands().remove("heos");
+        if (!event.getPlayer().hasPermission("luoos.admin")) {
+            event.getCommands().remove("los");
             event.getCommands().remove("ban");
             event.getCommands().remove("ban-ip");
             event.getCommands().remove("unban");

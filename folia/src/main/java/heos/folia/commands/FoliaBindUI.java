@@ -45,14 +45,24 @@ public final class FoliaBindUI implements Listener {
 
     public void showChatMenu(Player player) {
         List<FoliaStorage.BindingEntry> bindings = storage.listAllBindings();
+        boolean isAdmin = player.hasPermission("luoos.admin");
+
+        // Filter for self-management
+        if (!isAdmin) {
+            bindings = bindings.stream()
+                    .filter(e -> e.boundUuid.equals(player.getUniqueId())
+                            || (e.targetUuid != null && e.targetUuid.equals(player.getUniqueId())))
+                    .toList();
+        }
+
         if (bindings.isEmpty()) {
-            player.sendMessage(ChatColor.YELLOW + "当前没有任何绑定记录。");
+            player.sendMessage(ChatColor.YELLOW + "当前没有与你相关的绑定记录。");
             return;
         }
 
         player.sendMessage("");
-        player.sendMessage(ChatColor.GOLD + "╔══════════ HEOS 绑定管理 ══════════╗");
-        player.sendMessage(ChatColor.GOLD + "║  " + ChatColor.WHITE + "共 " + bindings.size() + " 条绑定记录" + ChatColor.GOLD + "                      ║");
+        player.sendMessage(ChatColor.GOLD + "╔══════════ LuoOS 绑定管理 ══════════╗");
+        player.sendMessage(ChatColor.GOLD + "║  " + ChatColor.WHITE + "共 " + bindings.size() + " 条" + (isAdmin ? " (管理员)" : " (你的)") + "绑定记录" + ChatColor.GOLD + "                      ║");
 
         SimpleDateFormat sdf = new SimpleDateFormat("MM-dd HH:mm");
         int count = 0;

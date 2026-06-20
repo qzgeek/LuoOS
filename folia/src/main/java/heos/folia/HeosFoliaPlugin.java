@@ -104,7 +104,7 @@ public final class HeosFoliaPlugin extends JavaPlugin {
         bind("login", cmds); bind("register", cmds); bind("changepassword", cmds);
         bind("ban", banCommands); bind("ban-ip", banCommands);
         bind("unban", banCommands); bind("unban-ip", banCommands); bind("banlist", banCommands);
-        bind("heos", adminCommands);
+        bind("los", adminCommands);
     }
 
     private void bind(String name, org.bukkit.command.CommandExecutor exec) {

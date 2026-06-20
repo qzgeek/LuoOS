@@ -65,7 +65,7 @@ public final class FoliaAdminCommands implements CommandExecutor, TabCompleter {
         }
 
         // Admin-only subcommands
-        if (!sender.hasPermission("heos.admin")) {
+        if (!sender.hasPermission("luoos.admin")) {
             sender.sendMessage(ChatColor.RED + "You do not have permission");
             return true;
         }
@@ -281,7 +281,7 @@ public final class FoliaAdminCommands implements CommandExecutor, TabCompleter {
             List<String> subs = new ArrayList<>();
             subs.add("login"); subs.add("register"); subs.add("changepassword");
             subs.add("bind");
-            if (sender.hasPermission("heos.admin")) {
+            if (sender.hasPermission("luoos.admin")) {
                 subs.add("ban"); subs.add("ban-ip"); subs.add("unban"); subs.add("unban-ip");
                 subs.add("banlist"); subs.add("resetpassword"); subs.add("info");
                 subs.add("whitelist"); subs.add("migrate"); subs.add("reload");
@@ -289,7 +289,7 @@ public final class FoliaAdminCommands implements CommandExecutor, TabCompleter {
             return filter(subs, args[0]);
         }
         if (args.length == 2 && args[0].equalsIgnoreCase("whitelist")) {
-            if (!sender.hasPermission("heos.admin")) {
+            if (!sender.hasPermission("luoos.admin")) {
                 return Collections.emptyList();
             }
             return filter(List.of("add", "remove", "list"), args[1]);
@@ -299,7 +299,7 @@ public final class FoliaAdminCommands implements CommandExecutor, TabCompleter {
         }
         if ((args.length == 2 && (args[0].equalsIgnoreCase("resetpassword") || args[0].equalsIgnoreCase("info")))
                 || (args.length == 3 && args[0].equalsIgnoreCase("whitelist") && !args[1].equalsIgnoreCase("list"))) {
-            if (!sender.hasPermission("heos.admin")) {
+            if (!sender.hasPermission("luoos.admin")) {
                 return Collections.emptyList();
             }
             String prefix = args[args.length - 1].toLowerCase();
