@@ -1,7 +1,7 @@
 package heos.folia.commands;
 
 import heos.folia.utils.FoliaPasswordHasher;
-import heos.folia.storage.FoliaNameResolver;
+import heos.folia.utils.FoliaNameResolver;
 import heos.folia.storage.FoliaPlayerData;
 import heos.folia.storage.FoliaStorage;
 import heos.folia.storage.FoliaWhitelistData;

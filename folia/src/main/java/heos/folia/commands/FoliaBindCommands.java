@@ -1,7 +1,7 @@
 package heos.folia.commands;
 
 import heos.folia.storage.FoliaAccountBinding;
-import heos.folia.storage.FoliaNameResolver;
+import heos.folia.utils.FoliaNameResolver;
 import heos.folia.storage.FoliaStorage;
 import heos.folia.utils.FoliaMessages;
 import org.bukkit.ChatColor;
