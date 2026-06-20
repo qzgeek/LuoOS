@@ -39,7 +39,7 @@ public final class FoliaBindCommands implements CommandExecutor, TabCompleter {
             case "accept"  -> accept(player, args);
             case "deny"    -> deny(player, args);
             case "status"  -> status(player);
-            case "manage"  -> bindUI.showChatMenu(player);
+            case "tui"     -> bindUI.showChatMenu(player);
             case "gui"     -> bindUI.showChestGui(player);
             case "list"    -> list(sender);
             case "revoke"  -> revoke(sender, args);
