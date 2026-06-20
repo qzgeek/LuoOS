@@ -296,6 +296,10 @@ public final class FoliaMessages {
         return translate("text.heos.bindGroupOnline").formatted(playerName);
     }
 
+    public static String bindAlreadyActive(String playerName) {
+        return translate("text.heos.bindAlreadyActive").formatted(playerName);
+    }
+
     private static String allowedUsernamePattern() {
         if (plugin != null && plugin.getConfig().getBoolean("allowMoreOfflineUsernameCharacters", true)) {
             return translate("text.heos.usernamePatternExtended");

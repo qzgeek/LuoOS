@@ -54,5 +54,6 @@
   "text.heos.bindSelfTarget": "\u00a7c不能绑定到自己！",
   "text.heos.bindIsTarget": "\u00a7c你的账号已被其他账号绑定，不能再去绑定别人。",
   "text.heos.bindTargetIsBound": "\u00a7c你已绑定到其他账号，不能作为被绑定目标。",
-  "text.heos.bindGroupOnline": "\u00a7c已有其他绑定账号在线！（%s）"
+  "text.heos.bindGroupOnline": "\u00a7c已有其他绑定账号在线！（%s）",
+  "text.heos.bindAlreadyActive": "\u00a7e%s 已经绑定到此账号。"
 }

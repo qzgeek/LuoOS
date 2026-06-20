@@ -67,6 +67,14 @@ public final class FoliaAccountBinding {
         if (storage.isBound(targetUuid))
             return BindResult.fail(FoliaMessages.bindTargetIsBound());
 
+        // Check: if already actively bound to this target, just confirm
+        UUID alreadyTargetUuid = storage.getTargetUuid(
+                UUID.nameUUIDFromBytes(("OfflinePlayer:" + boundName)
+                        .getBytes(java.nio.charset.StandardCharsets.UTF_8)));
+        if (alreadyTargetUuid != null && alreadyTargetUuid.equals(targetUuid)) {
+            return BindResult.fail(FoliaMessages.bindAlreadyActive(boundName));
+        }
+
         FoliaStorage.BindingEntry entry = storage.acceptBinding(targetUuid, targetName, boundName);
         if (entry == null) return BindResult.fail(FoliaMessages.bindNoPendingRequest(boundName));
 
