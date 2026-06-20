@@ -1,6 +1,8 @@
 package heos.folia.commands;
 
 import heos.folia.storage.FoliaBanData;
+import heos.folia.storage.FoliaNameResolver;
+import heos.folia.storage.FoliaPlayerData;
 import heos.folia.utils.FoliaDisconnects;
 import heos.folia.utils.FoliaMessages;
 import heos.folia.utils.FoliaPlayerAccess;
@@ -22,9 +24,11 @@ public final class FoliaBanCommands implements CommandExecutor, TabCompleter {
     private static final String DEFAULT_REASON = "You are banned";
 
     private final FoliaBanData banData;
+    private final FoliaNameResolver nameResolver;
 
-    public FoliaBanCommands(FoliaBanData banData) {
+    public FoliaBanCommands(FoliaBanData banData, FoliaNameResolver nameResolver) {
         this.banData = banData;
+        this.nameResolver = nameResolver;
     }
 
     @Override
@@ -33,7 +37,6 @@ public final class FoliaBanCommands implements CommandExecutor, TabCompleter {
             sender.sendMessage(ChatColor.RED + "You do not have permission");
             return true;
         }
-
         return onSubcommand(sender, command.getName().toLowerCase(), args);
     }
 
@@ -52,6 +55,28 @@ public final class FoliaBanCommands implements CommandExecutor, TabCompleter {
         };
     }
 
+    /**
+     * Resolve a player name that may include "正版_" or "离线_" prefix.
+     * Returns the underlying FoliaPlayerData if found via prefix, or null.
+     */
+    private ResolvedTarget resolveTarget(String nameArg) {
+        // Try prefixed name first
+        FoliaPlayerData prefixed = nameResolver.findByPrefixedName(nameArg);
+        if (prefixed != null) {
+            Player online = Bukkit.getPlayer(prefixed.uuid);
+            return new ResolvedTarget(prefixed.username, prefixed.uuid, online);
+        }
+
+        // Try as plain name — check if it's ambiguous
+        Player online = Bukkit.getPlayerExact(nameArg);
+        if (online != null) {
+            return new ResolvedTarget(online.getName(), online.getUniqueId(), online);
+        }
+
+        // Offline player — just use the name
+        return new ResolvedTarget(nameArg, null, null);
+    }
+
     private boolean banPlayer(CommandSender sender, String[] args) {
         if (args.length < 1) {
             return false;
@@ -62,17 +87,16 @@ public final class FoliaBanCommands implements CommandExecutor, TabCompleter {
             return true;
         }
 
-        String username = args[0];
-        Player target = Bukkit.getPlayerExact(username);
-        UUID uuid = target == null ? null : target.getUniqueId();
-        banData.addPlayerBan(username, uuid, parsed.reason, parsed.expiryTime, sender.getName());
+        ResolvedTarget target = resolveTarget(args[0]);
+        banData.addPlayerBan(target.name, target.uuid, parsed.reason, parsed.expiryTime, sender.getName());
 
-        sender.sendMessage(ChatColor.GREEN + "Banned player " + username);
+        String displayName = args[0];
+        sender.sendMessage(ChatColor.GREEN + "Banned player " + displayName);
         sender.sendMessage(ChatColor.GRAY + "Reason: " + parsed.reason);
         sender.sendMessage(ChatColor.GRAY + "Duration: " + FoliaTimeParser.formatDuration(parsed.expiryTime));
 
-        if (target != null) {
-            FoliaDisconnects.disconnect(target, banMessage(parsed.reason, parsed.expiryTime), "HEOS_BAN");
+        if (target.online != null) {
+            FoliaDisconnects.disconnect(target.online, banMessage(parsed.reason, parsed.expiryTime), "HEOS_BAN");
         }
         return true;
     }
@@ -105,7 +129,8 @@ public final class FoliaBanCommands implements CommandExecutor, TabCompleter {
         if (args.length != 1) {
             return false;
         }
-        boolean removedPlayer = banData.removePlayerBan(args[0]);
+        ResolvedTarget target = resolveTarget(args[0]);
+        boolean removedPlayer = banData.removePlayerBan(target.name);
         boolean removedIp = banData.removeIpBan(args[0]);
         if (removedPlayer || removedIp) {
             sender.sendMessage(ChatColor.GREEN + "Unbanned " + args[0]);
@@ -138,7 +163,8 @@ public final class FoliaBanCommands implements CommandExecutor, TabCompleter {
         if (!banData.playerBans.isEmpty()) {
             sender.sendMessage(ChatColor.YELLOW + "Player bans (" + banData.playerBans.size() + "):");
             for (FoliaBanData.BanEntry ban : banData.playerBans) {
-                sender.sendMessage(ChatColor.GRAY + "- " + ban.username + " | " + FoliaTimeParser.formatDuration(ban.expiryTime) + " | " + ban.reason);
+                String uuidStr = ban.uuid != null ? " [" + ban.uuid.toString().substring(0, 8) + "]" : "";
+                sender.sendMessage(ChatColor.GRAY + "- " + ban.username + uuidStr + " | " + FoliaTimeParser.formatDuration(ban.expiryTime) + " | " + ban.reason);
             }
         }
         if (!banData.ipBans.isEmpty()) {
@@ -155,7 +181,6 @@ public final class FoliaBanCommands implements CommandExecutor, TabCompleter {
         if (args.length <= start) {
             return new ParsedBan(-1L, DEFAULT_REASON);
         }
-
         long parsedTime = FoliaTimeParser.parse(args[start]);
         if (parsedTime != -2L) {
             return new ParsedBan(parsedTime, join(args, start + 1, DEFAULT_REASON));
@@ -204,5 +229,8 @@ public final class FoliaBanCommands implements CommandExecutor, TabCompleter {
     }
 
     private record ParsedBan(long expiryTime, String reason) {
+    }
+
+    private record ResolvedTarget(String name, UUID uuid, Player online) {
     }
 }

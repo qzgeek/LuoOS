@@ -1,9 +1,11 @@
 package heos.folia.event;
 
+import heos.folia.storage.FoliaAccountBinding;
 import heos.folia.storage.FoliaPlayerData;
 import heos.folia.storage.FoliaStorage;
 import heos.folia.utils.FoliaLoginFailureTracker;
 import heos.folia.utils.FoliaDisconnects;
+import heos.folia.utils.FoliaNameResolver;
 import heos.folia.utils.FoliaPasswordHasher;
 import heos.folia.utils.FoliaPlayerAccess;
 import heos.folia.utils.FoliaTpsDisplayService;
@@ -19,48 +21,83 @@ import java.util.concurrent.ConcurrentHashMap;
 public final class FoliaAuthService {
     private final Plugin plugin;
     private final FoliaStorage storage;
+    private final FoliaNameResolver nameResolver;
+    private final FoliaAccountBinding accountBinding;
     private final FoliaTpsDisplayService tpsDisplayService;
     private final FoliaLoginFailureTracker failureTracker;
     private final Map<UUID, Session> sessions = new ConcurrentHashMap<>();
     private final Map<String, Integer> authenticatedSessionsByIp = new ConcurrentHashMap<>();
 
-    public FoliaAuthService(Plugin plugin, FoliaStorage storage, FoliaTpsDisplayService tpsDisplayService) {
+    public FoliaAuthService(Plugin plugin, FoliaStorage storage, FoliaNameResolver nameResolver,
+                            FoliaAccountBinding accountBinding, FoliaTpsDisplayService tpsDisplayService) {
         this.plugin = plugin;
         this.storage = storage;
+        this.nameResolver = nameResolver;
+        this.accountBinding = accountBinding;
         this.tpsDisplayService = tpsDisplayService;
         this.failureTracker = new FoliaLoginFailureTracker(plugin);
     }
 
+    /**
+     * Resolve the effective UUID for a joining player after binding lookup.
+     * This is called before the player is fully logged in to determine identity.
+     */
+    public UUID resolveEffectiveUuid(UUID rawUuid) {
+        return accountBinding.resolveEffectiveUuid(rawUuid);
+    }
+
+    /**
+     * Prepare a player after join. Load or create their data, set up session.
+     */
     public void prepare(Player player) {
+        UUID uuid = player.getUniqueId();
         boolean premium = isPremiumUuid(player);
-        FoliaPlayerData data = storage.load(player.getName(), premium, separateOnlineOfflineAccounts());
+        String ip = FoliaPlayerAccess.ip(player);
+
+        FoliaPlayerData data = storage.load(uuid);
+        if (data == null) {
+            // New player, create data
+            data = new FoliaPlayerData(player.getName(), uuid, premium);
+        }
+        // Update username if it changed
+        if (!player.getName().equals(data.username)) {
+            data.username = player.getName();
+        }
+        data.isOnlineAccount = premium;
+        data.lastIp = ip;
+        data.lastLoginTime = System.currentTimeMillis();
+
+        // Resolve name conflicts
+        nameResolver.resolve(data);
+
         if (!isAuthenticationEnabled()) {
+            storage.save(data);
             Session session = new Session(data, true);
-            session.ip = FoliaPlayerAccess.ip(player);
-            sessions.put(player.getUniqueId(), session);
+            session.ip = ip;
+            sessions.put(uuid, session);
             updateLoginProtection(player, false);
             tpsDisplayService.start(player);
+            applyDisplayName(player, data);
             return;
         }
+
         if (premium) {
-            data.uuid = player.getUniqueId();
-            data.isOnlineAccount = true;
-            data.lastIp = FoliaPlayerAccess.ip(player);
-            data.lastLoginTime = System.currentTimeMillis();
+            data.uuid = uuid;
             storage.save(data);
-            
             Session session = new Session(data, true);
-            session.ip = FoliaPlayerAccess.ip(player);
-            sessions.put(player.getUniqueId(), session);
+            session.ip = ip;
+            sessions.put(uuid, session);
             updateLoginProtection(player, false);
             tpsDisplayService.start(player);
+            applyDisplayName(player, data);
             player.sendMessage(ChatColor.GREEN + FoliaMessages.premiumWelcome());
             return;
         }
 
         boolean registered = data.isRegistered();
-        sessions.put(player.getUniqueId(), new Session(data, false));
+        sessions.put(uuid, new Session(data, false));
         updateLoginProtection(player, true);
+        applyDisplayName(player, data);
         player.sendMessage(registered
                 ? ChatColor.YELLOW + FoliaMessages.loginInputHint()
                 : ChatColor.YELLOW + FoliaMessages.registerInputHint());
@@ -96,10 +133,6 @@ public final class FoliaAuthService {
 
     public boolean areOfflinePlayersAllowed() {
         return plugin.getConfig().getBoolean("allowOfflinePlayers", true);
-    }
-
-    public boolean separateOnlineOfflineAccounts() {
-        return plugin.getConfig().getBoolean("separateOnlineOfflineAccounts", true);
     }
 
     public boolean canRunCommandWhileLocked(String commandLine) {
@@ -209,6 +242,26 @@ public final class FoliaAuthService {
         sessions.clear();
     }
 
+    public FoliaPlayerData getPlayerData(UUID uuid) {
+        Session session = sessions.get(uuid);
+        if (session != null) {
+            return session.data;
+        }
+        return storage.load(uuid);
+    }
+
+    public FoliaStorage getStorage() {
+        return storage;
+    }
+
+    public FoliaNameResolver getNameResolver() {
+        return nameResolver;
+    }
+
+    public FoliaAccountBinding getAccountBinding() {
+        return accountBinding;
+    }
+
     private void scheduleLoginTimeout(Player player) {
         int timeoutSeconds = Math.max(1, plugin.getConfig().getInt("loginTimeout", 60));
         player.getScheduler().runDelayed(plugin, task -> {
@@ -233,11 +286,16 @@ public final class FoliaAuthService {
     }
 
     private Session session(Player player) {
-        boolean premium = isPremiumUuid(player);
-        return sessions.computeIfAbsent(player.getUniqueId(), ignored -> new Session(
-                storage.load(player.getName(), premium, separateOnlineOfflineAccounts()),
-                false
-        ));
+        UUID uuid = player.getUniqueId();
+        return sessions.computeIfAbsent(uuid, ignored -> {
+            FoliaPlayerData data = storage.load(uuid);
+            if (data == null) {
+                boolean premium = isPremiumUuid(player);
+                data = new FoliaPlayerData(player.getName(), uuid, premium);
+                nameResolver.resolve(data);
+            }
+            return new Session(data, false);
+        });
     }
 
     private boolean markAuthenticated(Player player, Session session) {
@@ -266,6 +324,13 @@ public final class FoliaAuthService {
         player.setInvulnerable(protectedDuringLogin);
         player.setInvisible(protectedDuringLogin);
         player.setCollidable(!protectedDuringLogin);
+    }
+
+    private static void applyDisplayName(Player player, FoliaPlayerData data) {
+        if (data.hasNameConflict && data.displayName != null) {
+            player.displayName(net.kyori.adventure.text.Component.text(data.displayName));
+            player.playerListName(net.kyori.adventure.text.Component.text(data.displayName));
+        }
     }
 
     private void decrementIp(String ip) {

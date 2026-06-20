@@ -41,8 +41,10 @@ commands:
     permission: heos.admin
   heos:
     description: Heos administration
-    usage: /heos <login|register|changepassword|ban|ban-ip|unban|unban-ip|banlist|resetpassword|info|whitelist|migrate|reload>
+    usage: /heos <login|register|changepassword|ban|ban-ip|unban|unban-ip|banlist|resetpassword|info|whitelist|migrate|reload|bind>
     permission: heos.admin
 permissions:
   heos.admin:
     default: op
+  heos.bind:
+    default: true

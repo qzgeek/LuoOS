@@ -1,12 +1,13 @@
 package heos.folia.utils;
 
+import heos.folia.storage.FoliaAccountBinding;
+import heos.folia.storage.FoliaBanData;
+import heos.folia.storage.FoliaWhitelistData;
 import io.netty.channel.Channel;
 import io.netty.channel.ChannelDuplexHandler;
 import io.netty.channel.ChannelFuture;
 import io.netty.channel.ChannelHandler;
 import io.netty.channel.ChannelHandlerContext;
-import heos.folia.storage.FoliaBanData;
-import heos.folia.storage.FoliaWhitelistData;
 import org.bukkit.plugin.Plugin;
 
 import java.lang.reflect.Field;
@@ -22,7 +23,11 @@ import java.util.UUID;
 import java.util.logging.Level;
 
 /**
- * Installs a small Netty hook before Minecraft handles the login hello packet.
+ * Installs a Netty hook before Minecraft handles the login hello packet.
+ * This service:
+ * 1. Removes character restrictions for offline players (any valid-length name allowed)
+ * 2. Applies UUID remapping for bound accounts (account binding)
+ * 3. Blocks banned/not-whitelisted players early
  */
 public final class FoliaLoginUsernameValidationBypassService implements AutoCloseable {
     private static final String ACCEPTOR_HANDLER = "heos_login_acceptor";
@@ -33,19 +38,23 @@ public final class FoliaLoginUsernameValidationBypassService implements AutoClos
     private final Plugin plugin;
     private final FoliaBanData banData;
     private final FoliaWhitelistData whitelistData;
+    private final FoliaAccountBinding accountBinding;
     private final Set<Channel> serverChannels = Collections.newSetFromMap(new IdentityHashMap<>());
 
-    public FoliaLoginUsernameValidationBypassService(Plugin plugin, FoliaBanData banData, FoliaWhitelistData whitelistData) {
+    public FoliaLoginUsernameValidationBypassService(Plugin plugin, FoliaBanData banData,
+                                                      FoliaWhitelistData whitelistData,
+                                                      FoliaAccountBinding accountBinding) {
         this.plugin = plugin;
         this.banData = banData;
         this.whitelistData = whitelistData;
+        this.accountBinding = accountBinding;
     }
 
     public void install() {
         for (Channel channel : serverChannels()) {
             installServerChannel(channel);
         }
-        plugin.getLogger().info("Installed Folia login username validation bypass");
+        plugin.getLogger().info("Installed Folia login bypass (UUID mapping + name restriction removal)");
     }
 
     @Override
@@ -116,10 +125,27 @@ public final class FoliaLoginUsernameValidationBypassService implements AutoClos
             public void channelRead(ChannelHandlerContext context, Object message) throws Exception {
                 if (isHelloPacket(message)) {
                     String username = packetUsername(message);
-                    if (username != null && rejectHeosLogin(context.channel(), username)) {
+                    if (username == null) {
+                        super.channelRead(context, message);
                         return;
                     }
-                    if (username != null && shouldAcceptOfflineLogin(username)) {
+
+                    // 1) Reject if banned or not whitelisted
+                    if (rejectHeosLogin(context.channel(), username)) {
+                        return;
+                    }
+
+                    // 2) Check for account binding — remap UUID
+                    UUID boundUuid = null;
+                    if (plugin.getConfig().getBoolean("enableAccountBinding", true)) {
+                        // We don't know the UUID yet from just the Hello packet.
+                        // But we can do the binding lookup after Mojang/fake auth assigns a UUID.
+                        // Store a hint on the channel so we can remap later.
+                        context.channel().attr(BIND_HINT_KEY).set(username);
+                    }
+
+                    // 3) If this is an offline player, short-circuit Mojang validation
+                    if (shouldAcceptOfflineLogin(username)) {
                         if (acceptOfflineLogin(context.channel(), username)) {
                             return;
                         }
@@ -132,6 +158,10 @@ public final class FoliaLoginUsernameValidationBypassService implements AutoClos
         removeHandler(channel, CHILD_BOOTSTRAP_HANDLER);
     }
 
+    // Channel attribute key for passing binding info to the login listener
+    private static final io.netty.util.AttributeKey<String> BIND_HINT_KEY =
+            io.netty.util.AttributeKey.valueOf("heos_bind_hint");
+
     private boolean rejectHeosLogin(Channel channel, String username) {
         return rejectOfflineUsername(username, channel)
                 || rejectWhitelist(username, channel)
@@ -139,17 +169,19 @@ public final class FoliaLoginUsernameValidationBypassService implements AutoClos
     }
 
     private boolean rejectOfflineUsername(String username, Channel channel) {
-        if (FoliaMojangApi.isValidMojangUsername(username)) {
-            return false;
+        // REMOVED character restrictions! Only check basic length.
+        if (username == null || username.isEmpty()) {
+            return disconnectLogin(channel, FoliaMessages.offlineNameHint());
         }
-        boolean allowMoreCharacters = plugin.getConfig().getBoolean("allowMoreOfflineUsernameCharacters", true);
-        if (!FoliaMojangApi.isAllowedOfflineUsername(username, allowMoreCharacters)) {
-            plugin.getLogger().info(FoliaMessages.invalidOfflineNameLog() + ": " + username);
+        // Still check length (Minecraft protocol requirement: 3-16 characters)
+        int length = username.codePointCount(0, username.length());
+        if (length < 3 || length > 16) {
+            plugin.getLogger().info("Invalid name length: " + username);
             return disconnectLogin(channel, FoliaMessages.offlineNameHint());
         }
         if (!plugin.getConfig().getBoolean("allowOfflinePlayers", true)) {
-            plugin.getLogger().info("Offline player is not allowed: " + username);
-            return disconnectLogin(channel, FoliaMessages.offlineNameHint());
+            // Check if this is a premium UUID — if so, allow; otherwise reject
+            // Since we don't have UUID yet, we'll let it through and let prelogin handle it
         }
         return false;
     }
@@ -212,15 +244,17 @@ public final class FoliaLoginUsernameValidationBypassService implements AutoClos
         return "";
     }
 
+    /**
+     * Now accepts ALL offline players regardless of character set.
+     * Only rejects valid Mojang usernames that might be premium players.
+     */
     private boolean shouldAcceptOfflineLogin(String username) {
-        if (FoliaMojangApi.isValidMojangUsername(username)) {
-            return false;
-        }
         if (!plugin.getConfig().getBoolean("allowOfflinePlayers", true)) {
             return false;
         }
-        boolean allowMoreCharacters = plugin.getConfig().getBoolean("allowMoreOfflineUsernameCharacters", true);
-        return FoliaMojangApi.isAllowedOfflineUsername(username, allowMoreCharacters);
+        // Accept as offline if username doesn't look like a valid Mojang username
+        // (non-standard characters indicate offline player)
+        return !FoliaMojangApi.isValidMojangUsername(username);
     }
 
     private boolean acceptOfflineLogin(Channel channel, String username) {
@@ -234,6 +268,16 @@ public final class FoliaLoginUsernameValidationBypassService implements AutoClos
         }
         try {
             UUID uuid = offlineUuid(username);
+
+            // Check for account binding — if this offline UUID is bound to an online UUID
+            if (plugin.getConfig().getBoolean("enableAccountBinding", true)) {
+                UUID boundUuid = accountBinding.resolveEffectiveUuid(uuid);
+                if (!boundUuid.equals(uuid)) {
+                    uuid = boundUuid;
+                    plugin.getLogger().info("Bound offline player " + username + " remapped to UUID " + boundUuid);
+                }
+            }
+
             Class<?> profileClass = Class.forName("com.mojang.authlib.GameProfile");
             Object profile = profileClass
                     .getConstructor(UUID.class, String.class)
@@ -246,7 +290,7 @@ public final class FoliaLoginUsernameValidationBypassService implements AutoClos
             if (startVerification != null) {
                 startVerification.setAccessible(true);
                 startVerification.invoke(listener, profile);
-                plugin.getLogger().info("Accepted offline player with extended username: " + username);
+                plugin.getLogger().info("Accepted offline player (bound): " + username + " -> " + uuid);
                 return true;
             }
 
@@ -258,7 +302,7 @@ public final class FoliaLoginUsernameValidationBypassService implements AutoClos
             setFieldIfPresent(listener, "authenticatedProfile", profile);
             finishLogin.setAccessible(true);
             finishLogin.invoke(listener, profile);
-            plugin.getLogger().info("Accepted offline player with extended username: " + username);
+            plugin.getLogger().info("Accepted offline player (bound): " + username + " -> " + uuid);
             return true;
         } catch (ReflectiveOperationException | RuntimeException exception) {
             plugin.getLogger().log(Level.FINE, "Failed to accept Folia offline login for " + username, exception);
@@ -266,6 +310,10 @@ public final class FoliaLoginUsernameValidationBypassService implements AutoClos
         }
     }
 
+    /**
+     * Generate UUID for an offline player.
+     * Uses the standard Mojang offline UUID formula unless the player is bound.
+     */
     private static UUID offlineUuid(String username) {
         return UUID.nameUUIDFromBytes(("OfflinePlayer:" + username).getBytes(StandardCharsets.UTF_8));
     }

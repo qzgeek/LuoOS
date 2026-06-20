@@ -1,77 +1,102 @@
-# 是否启用登录/注册认证。关闭后玩家无需使用 /login 或 /register。
+# HEOS Folia Configuration
+# 
+# Account Binding: Allows players to link new accounts (online/offline) to old ones.
+# When bound, the new account UUID is transparently remapped to the old UUID,
+# so all server data and plugins see the original identity.
+#
+# Name Prefix: When online and offline accounts share the same username,
+# the display name gets a prefix (e.g. "正版_Player1", "离线_Player1").
+
+# --- Authentication ---
+# Whether to enable login/register authentication.
+# When disabled, players do not need /login or /register.
 enableAuthentication: true
 
-# 语言文件代码，例如 zh_cn 或 en_us。多数提示文本会从对应语言文件读取。
+# Language file code, e.g. zh_cn or en_us.
 language: zh_cn
 
-# 在线模式服务器中是否允许非正版玩家进入。关闭后只允许通过正版验证的玩家进入。
-# 允许的离线玩家名称格式：A-Z、a-z、0-9、_、+、-、.，长度 3-16。
+# Allow offline (non-premium) players to join an online-mode server.
+# When enabled, offline players bypass Mojang validation.
 allowOfflinePlayers: true
 
-# 允许离线玩家名称使用更多常规网站用户名字符，例如中文、其他语言字母和数字。
-# 关闭后仅允许 A-Z、a-z、0-9、_、+、-、.，长度仍为 3-16。
+# Allow offline usernames with extended character sets (Chinese, combining marks, etc.)
+# When false, only [a-zA-Z0-9_+-.] are allowed.
 allowMoreOfflineUsernameCharacters: true
 
-# 是否分离同名正版账号和离线账号的 Heos 登录数据，避免账号类型切换时覆盖注册信息。
+# Separate online/premium and offline account data.
+# When enabled, the same username can have both a premium and an offline data entry.
+# They are distinguished by UUID.
 separateOnlineOfflineAccounts: true
 
-# 是否拦截无命名空间前缀的 login/register/changepassword 等命令。
+# Intercept unprefixed (no namespace) login/register/changepassword commands.
 enableUnprefixedCommandHijack: true
 
-# 玩家进入服务器后必须完成登录/注册的时间限制，单位为秒。
+# Time limit (seconds) for a player to login/register after joining.
 loginTimeout: 60
 
-# 未登录玩家收到登录/注册提醒的间隔，单位为秒。
+# Reminder interval (seconds) to remind unauthenticated players to login/register.
 loginReminderSeconds: 10
 
-# 注册密码允许的最短长度。
+# Minimum password length for registration.
 minPasswordLength: 4
 
-# 注册密码允许的最长长度。
+# Maximum password length for registration.
 maxPasswordLength: 32
 
-# 是否在玩家列表页脚显示服务器 TPS 信息。
+# --- Account Binding ---
+# Whether to enable the account binding system (/heos bind ...).
+enableAccountBinding: true
+
+# --- TPS Display ---
+# Whether to show TPS in the player list footer.
 enableAutoLogTps: true
 
-# TPS 信息刷新间隔，单位为 tick。20 tick 约等于 1 秒。
+# TPS refresh interval in ticks (20 ticks = 1 second).
 autoLogTpsDelayTicks: 20
 
-# 是否启用配方查看器同步。仅在支持的 Minecraft 版本上生效。
+# --- Recipe Viewer Sync ---
+# Sync server recipe data to client recipe viewers (JEI/REI).
+# Only works on Minecraft 1.21.2+.
 enableRecipeViewerSync: true
 
-# 是否启用 Heos 自带白名单检查。
+# --- Whitelist ---
+# Whether to enable the HEOS built-in whitelist.
 enableWhitelist: false
 
-# 是否启用 Heos 自带封禁系统和封禁命令。
+# --- Ban System ---
+# Whether to enable the HEOS custom ban system.
 enableCustomBan: true
 
-# 是否启用离线/正版玩家数据迁移功能。只在需要迁移玩家数据时开启。
+# --- Player Data Migration ---
+# Whether to enable player data migration.
+# Only enable when you need to migrate player data.
 enablePlayerDataMigration: false
 
-# 数据迁移期间临时阻止相关玩家登录的时间，单位为秒。
+# Temporary ban duration (seconds) for players during data migration.
 migrationBanSeconds: 30
 
-# 同一个 IP 最多允许同时在线的玩家数量。-1 表示不限制。
+# --- Session Limits ---
+# Maximum concurrent sessions from the same IP. -1 = no limit.
 maxConcurrentSessionsPerIp: -1
 
-# 同 IP 在线数量超过 maxConcurrentSessionsPerIp 时踢出玩家显示的消息。
-# 这是管理员可自定义文案，不会自动跟随语言文件。
+# Kick message when the session limit is exceeded.
 sessionLimitKickMessage: The online session limit for this IP has been reached
 
-# 是否在同一用户名连续登录失败过多时临时锁定该用户名。
+# --- Login Failure Protection ---
+# Temporarily lock a username after too many failed login attempts.
 enableUsernameLoginFailureLock: true
 
-# 触发用户名临时锁定前允许的连续失败次数。
+# Number of failed attempts before locking the username.
 usernameLoginFailureLimit: 5
 
-# 用户名触发失败锁定后的持续时间，单位为秒。
+# Lock duration (seconds) for the username.
 usernameLoginFailureLockSeconds: 30
 
-# 是否在同一 IP 连续登录失败过多时临时锁定该 IP。
+# Temporarily lock an IP after too many failed login attempts.
 enableIpLoginFailureLock: false
 
-# 触发 IP 临时锁定前允许的连续失败次数。
+# Number of failed attempts before locking the IP.
 ipLoginFailureLimit: 10
 
-# IP 触发失败锁定后的持续时间，单位为秒。
+# Lock duration (seconds) for the IP.
 ipLoginFailureLockSeconds: 30

@@ -1,6 +1,7 @@
 package heos.folia.commands;
 
 import heos.folia.storage.FoliaBanData;
+import heos.folia.storage.FoliaNameResolver;
 import heos.folia.storage.FoliaPlayerData;
 import heos.folia.storage.FoliaStorage;
 import heos.folia.utils.FoliaDisconnects;
@@ -19,6 +20,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.util.LinkedHashSet;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
@@ -37,12 +39,14 @@ public final class FoliaMigrationCommands {
     private final Plugin plugin;
     private final FoliaStorage storage;
     private final FoliaBanData banData;
+    private final FoliaNameResolver nameResolver;
     private final Map<UUID, PendingMigration> pendingMigrations = new ConcurrentHashMap<>();
 
-    public FoliaMigrationCommands(Plugin plugin, FoliaStorage storage, FoliaBanData banData) {
+    public FoliaMigrationCommands(Plugin plugin, FoliaStorage storage, FoliaBanData banData, FoliaNameResolver nameResolver) {
         this.plugin = plugin;
         this.storage = storage;
         this.banData = banData;
+        this.nameResolver = nameResolver;
     }
 
     public boolean onHeosSubcommand(CommandSender sender, String[] args) {
@@ -125,24 +129,44 @@ public final class FoliaMigrationCommands {
             FoliaDisconnects.disconnect(targetOnline, "Data is being migrated to your account. Please log in again later", "HEOS_MIGRATION_TARGET");
         }
 
+        // Collect all UUIDs associated with the source name
         Set<UUID> sourceUuids = collectPlayerUuids(migration.sourceUsername);
-        UUID sourceUuid = sourceUuids.iterator().next();
         UUID targetUuid = resolvePlayerUuid(migration.targetUsername);
-        Path worldDir = primaryWorldPath();
 
+        // Try to resolve the target's existing UUID from storage
+        List<FoliaPlayerData> targetDataList = storage.loadAllByName(migration.targetUsername);
+        UUID existingTargetUuid = null;
+        for (FoliaPlayerData d : targetDataList) {
+            if (d.uuid != null) {
+                existingTargetUuid = d.uuid;
+                break;
+            }
+        }
+        if (existingTargetUuid != null) {
+            targetUuid = existingTargetUuid;
+        }
+
+        Path worldDir = primaryWorldPath();
         int copied = copyPlayerFiles(worldDir, sourceUuids, targetUuid);
-        if (storage.exists(migration.sourceUsername)) {
-            FoliaPlayerData sourceData = storage.load(migration.sourceUsername);
-            FoliaPlayerData targetData = storage.load(migration.targetUsername);
-            targetData.username = migration.targetUsername;
-            targetData.uuid = targetUuid;
-            targetData.passwordHash = sourceData.passwordHash;
-            targetData.lastIp = sourceData.lastIp;
-            targetData.isOnlineAccount = false;
-            targetData.registeredTime = sourceData.registeredTime;
-            targetData.lastLoginTime = System.currentTimeMillis();
-            storage.save(targetData);
-            copied++;
+
+        // Migrate HEOS data: find source data by name, copy to target UUID
+        List<FoliaPlayerData> sourceDataList = storage.loadAllByName(migration.sourceUsername);
+        for (FoliaPlayerData sourceData : sourceDataList) {
+            if (sourceData.isRegistered()) {
+                FoliaPlayerData targetData = storage.load(targetUuid);
+                if (targetData == null) {
+                    targetData = new FoliaPlayerData(migration.targetUsername, targetUuid, sourceData.isOnlineAccount);
+                }
+                targetData.username = migration.targetUsername;
+                targetData.uuid = targetUuid;
+                targetData.passwordHash = sourceData.passwordHash;
+                targetData.lastIp = sourceData.lastIp;
+                targetData.isOnlineAccount = sourceData.isOnlineAccount;
+                targetData.registeredTime = sourceData.registeredTime;
+                targetData.lastLoginTime = System.currentTimeMillis();
+                storage.save(targetData);
+                copied++;
+            }
         }
 
         if (copied == 0) {
@@ -153,11 +177,12 @@ public final class FoliaMigrationCommands {
         int deleted = clearSourceData(worldDir, migration.sourceUsername, sourceUuids);
         int banSeconds = Math.min(MAX_MIGRATION_BAN_SECONDS, Math.max(1, plugin.getConfig().getInt("migrationBanSeconds", 30)));
         long banExpiry = System.currentTimeMillis() + banSeconds * 1000L;
+        UUID sourceUuid = sourceUuids.isEmpty() ? null : sourceUuids.iterator().next();
         banData.addPlayerBan(migration.sourceUsername, sourceUuid, "Data migration in progress", banExpiry, sender.getName());
 
         sender.sendMessage(ChatColor.GRAY + "=================================");
         sender.sendMessage(ChatColor.GREEN + "Data migration complete");
-        sender.sendMessage(ChatColor.GRAY + "Source player: " + migration.sourceUsername + " (" + sourceUuid + ")");
+        sender.sendMessage(ChatColor.GRAY + "Source player: " + migration.sourceUsername + (sourceUuid != null ? " (" + sourceUuid + ")" : ""));
         sender.sendMessage(ChatColor.GRAY + "Target player: " + migration.targetUsername + " (" + targetUuid + ")");
         sender.sendMessage(ChatColor.GRAY + "Migrated entries: " + copied);
         sender.sendMessage(ChatColor.GRAY + "Cleaned source entries: " + deleted);
@@ -179,9 +204,12 @@ public final class FoliaMigrationCommands {
         if (online != null) {
             uuids.add(online.getUniqueId());
         }
-        FoliaPlayerData data = storage.load(username);
-        if (data.uuid != null) {
-            uuids.add(data.uuid);
+        // Also collect UUIDs from storage
+        List<FoliaPlayerData> dataList = storage.loadAllByName(username);
+        for (FoliaPlayerData data : dataList) {
+            if (data.uuid != null) {
+                uuids.add(data.uuid);
+            }
         }
         uuids.add(resolvePlayerUuid(username));
         return uuids;
@@ -224,8 +252,12 @@ public final class FoliaMigrationCommands {
                 }
             }
         }
-        if (storage.delete(sourceUsername)) {
-            deleted++;
+        // Delete all storage entries for this username
+        List<FoliaPlayerData> sourceDataList = storage.loadAllByName(sourceUsername);
+        for (FoliaPlayerData data : sourceDataList) {
+            if (data.uuid != null && storage.delete(data.uuid)) {
+                deleted++;
+            }
         }
         return deleted;
     }

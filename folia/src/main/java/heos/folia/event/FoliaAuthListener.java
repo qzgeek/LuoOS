@@ -1,7 +1,8 @@
 package heos.folia.event;
 
-import heos.folia.commands.FoliaBanCommands;
 import heos.folia.storage.FoliaBanData;
+import heos.folia.storage.FoliaNameResolver;
+import heos.folia.storage.FoliaPlayerData;
 import heos.folia.storage.FoliaWhitelistData;
 import net.kyori.adventure.text.Component;
 import org.bukkit.ChatColor;
@@ -29,7 +30,6 @@ import org.bukkit.event.player.PlayerMoveEvent;
 import org.bukkit.event.player.PlayerQuitEvent;
 import org.bukkit.plugin.Plugin;
 import heos.folia.utils.FoliaMessages;
-import heos.folia.utils.FoliaMojangApi;
 import heos.folia.utils.FoliaTimeParser;
 
 public final class FoliaAuthListener implements Listener {
@@ -48,23 +48,30 @@ public final class FoliaAuthListener implements Listener {
     @EventHandler(priority = EventPriority.HIGHEST)
     void onPreLogin(AsyncPlayerPreLoginEvent event) {
         String username = event.getName();
-        boolean allowMoreCharacters = plugin.getConfig().getBoolean("allowMoreOfflineUsernameCharacters", true);
-        if (!FoliaMojangApi.isValidMojangUsername(username) && !FoliaMojangApi.isAllowedOfflineUsername(username, allowMoreCharacters)) {
-            event.disallow(AsyncPlayerPreLoginEvent.Result.KICK_OTHER, kickComponent(FoliaMessages.offlineNameHint()));
-            return;
-        }
-        if (!authService.areOfflinePlayersAllowed() && !isPremiumUuid(username, event.getUniqueId())) {
+        java.util.UUID uuid = event.getUniqueId();
+
+        // Check if this player is not allowed (offline mode restrictions)
+        if (!authService.areOfflinePlayersAllowed() && !isPremiumUuid(username, uuid)) {
             plugin.getLogger().info("Offline player is not allowed: " + username);
             event.disallow(AsyncPlayerPreLoginEvent.Result.KICK_OTHER, kickComponent(FoliaMessages.offlineNameHint()));
             return;
         }
-        if (plugin.getConfig().getBoolean("enableWhitelist", false) && !whitelistData.isWhitelisted(username)) {
-            event.disallow(AsyncPlayerPreLoginEvent.Result.KICK_WHITELIST, kickComponent(FoliaMessages.whitelistKick()));
-            plugin.getLogger().info(FoliaMessages.whitelistDeniedLog(username));
-            return;
+
+        // Whitelist check — by UUID first, then by name
+        if (plugin.getConfig().getBoolean("enableWhitelist", false)) {
+            if (!whitelistData.isWhitelisted(uuid) && !whitelistData.isWhitelisted(username)) {
+                event.disallow(AsyncPlayerPreLoginEvent.Result.KICK_WHITELIST, kickComponent(FoliaMessages.whitelistKick()));
+                plugin.getLogger().info(FoliaMessages.whitelistDeniedLog(username));
+                return;
+            }
         }
+
+        // Ban check — by UUID
         if (plugin.getConfig().getBoolean("enableCustomBan", true)) {
-            FoliaBanData.BanEntry playerBan = banData.getPlayerBan(username, event.getUniqueId());
+            FoliaBanData.BanEntry playerBan = banData.getPlayerBanByUuid(uuid);
+            if (playerBan == null) {
+                playerBan = banData.getPlayerBan(username, null);
+            }
             if (playerBan != null) {
                 if (FoliaMessages.isMigrationReason(playerBan.reason)) {
                     plugin.getLogger().info(FoliaMessages.migrationBanAttemptLog(username));

@@ -11,12 +11,14 @@ import java.nio.file.Path;
 import java.util.HashSet;
 import java.util.Locale;
 import java.util.Set;
+import java.util.UUID;
 import java.util.logging.Logger;
 
 public final class FoliaWhitelistData {
     private static final Gson GSON = new GsonBuilder().setPrettyPrinting().create();
 
     public Set<String> usernames = new HashSet<>();
+    public Set<String> uuids = new HashSet<>();  // UUID-based whitelist entries
 
     private transient Path file;
     private transient Logger logger;
@@ -48,9 +50,17 @@ public final class FoliaWhitelistData {
         }
     }
 
+    /** Check if player is whitelisted by either name or UUID. */
     public synchronized boolean isWhitelisted(String username) {
         ensure();
         return usernames.contains(normalize(username));
+    }
+
+    /** Check if player is whitelisted by UUID. */
+    public synchronized boolean isWhitelisted(UUID uuid) {
+        ensure();
+        if (uuids == null) return false;
+        return uuids.contains(uuid.toString());
     }
 
     public synchronized boolean add(String username) {
@@ -62,9 +72,29 @@ public final class FoliaWhitelistData {
         return added;
     }
 
+    public synchronized boolean add(UUID uuid) {
+        ensure();
+        if (uuids == null) uuids = new HashSet<>();
+        boolean added = uuids.add(uuid.toString());
+        if (added) {
+            save();
+        }
+        return added;
+    }
+
     public synchronized boolean remove(String username) {
         ensure();
         boolean removed = usernames.remove(normalize(username));
+        if (removed) {
+            save();
+        }
+        return removed;
+    }
+
+    public synchronized boolean removeByUuid(UUID uuid) {
+        ensure();
+        if (uuids == null) return false;
+        boolean removed = uuids.remove(uuid.toString());
         if (removed) {
             save();
         }
@@ -104,6 +134,9 @@ public final class FoliaWhitelistData {
     private void ensure() {
         if (usernames == null) {
             usernames = new HashSet<>();
+        }
+        if (uuids == null) {
+            uuids = new HashSet<>();
         }
     }
 

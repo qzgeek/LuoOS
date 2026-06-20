@@ -53,7 +53,21 @@ public final class FoliaBanData {
     public synchronized BanEntry getPlayerBan(String username, UUID uuid) {
         removeExpired();
         for (BanEntry ban : playerBans) {
-            if (ban.username.equalsIgnoreCase(username) || (uuid != null && uuid.equals(ban.uuid))) {
+            if (uuid != null && uuid.equals(ban.uuid)) {
+                return ban;
+            }
+            if (ban.username.equalsIgnoreCase(username)) {
+                return ban;
+            }
+        }
+        return null;
+    }
+
+    /** Look up ban by UUID only (ignoring name). */
+    public synchronized BanEntry getPlayerBanByUuid(UUID uuid) {
+        removeExpired();
+        for (BanEntry ban : playerBans) {
+            if (uuid != null && uuid.equals(ban.uuid)) {
                 return ban;
             }
         }

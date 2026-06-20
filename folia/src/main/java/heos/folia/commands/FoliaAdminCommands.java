@@ -1,6 +1,7 @@
 package heos.folia.commands;
 
 import heos.folia.utils.FoliaPasswordHasher;
+import heos.folia.storage.FoliaNameResolver;
 import heos.folia.storage.FoliaPlayerData;
 import heos.folia.storage.FoliaStorage;
 import heos.folia.storage.FoliaWhitelistData;
@@ -17,6 +18,7 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Date;
 import java.util.List;
+import java.util.UUID;
 
 public final class FoliaAdminCommands implements CommandExecutor, TabCompleter {
     private final FoliaStorage storage;
@@ -25,14 +27,23 @@ public final class FoliaAdminCommands implements CommandExecutor, TabCompleter {
     private final org.bukkit.plugin.Plugin plugin;
     private final FoliaAuthService authService;
     private final FoliaBanCommands banCommands;
+    private final FoliaBindCommands bindCommands;
+    private final FoliaNameResolver nameResolver;
 
-    public FoliaAdminCommands(org.bukkit.plugin.Plugin plugin, FoliaStorage storage, FoliaWhitelistData whitelistData, FoliaMigrationCommands migrationCommands, FoliaAuthService authService, FoliaBanCommands banCommands) {
+    public FoliaAdminCommands(org.bukkit.plugin.Plugin plugin, FoliaStorage storage,
+                              FoliaWhitelistData whitelistData,
+                              FoliaMigrationCommands migrationCommands,
+                              FoliaAuthService authService,
+                              FoliaBanCommands banCommands,
+                              FoliaBindCommands bindCommands) {
         this.plugin = plugin;
         this.storage = storage;
         this.whitelistData = whitelistData;
         this.migrationCommands = migrationCommands;
         this.authService = authService;
         this.banCommands = banCommands;
+        this.bindCommands = bindCommands;
+        this.nameResolver = authService.getNameResolver();
     }
 
     @Override
@@ -43,9 +54,14 @@ public final class FoliaAdminCommands implements CommandExecutor, TabCompleter {
 
         String sub = args[0].toLowerCase();
 
-        // Always-available auth subcommands: avoids needing `heos:` prefix when /login or /register conflicts.
+        // Always-available auth subcommands
         if (sub.equals("login") || sub.equals("register") || sub.equals("changepassword")) {
             return auth(sender, args);
+        }
+
+        // Bind commands — available to all players
+        if (sub.equals("bind")) {
+            return bindCommands.onCommand(sender, command, label, shiftArgs(args));
         }
 
         // Admin-only subcommands
@@ -108,23 +124,54 @@ public final class FoliaAdminCommands implements CommandExecutor, TabCompleter {
         return shifted;
     }
 
+    private FoliaPlayerData resolvePlayer(String nameArg, CommandSender sender) {
+        // Try prefixed name first
+        FoliaPlayerData prefixed = nameResolver.findByPrefixedName(nameArg);
+        if (prefixed != null) {
+            return prefixed;
+        }
+
+        // Load by plain name
+        List<FoliaPlayerData> all = storage.loadAllByName(nameArg);
+        if (all.size() > 1) {
+            // Ambiguous — show hint
+            sender.sendMessage(ChatColor.RED + ambiguousNameMsg(nameArg));
+            sender.sendMessage(ChatColor.YELLOW + FoliaMessages.nameAmbiguousHint());
+            for (FoliaPlayerData data : all) {
+                nameResolver.resolve(data);
+                sender.sendMessage(ChatColor.GRAY + "  - " + data.effectiveDisplayName()
+                        + " (" + (data.isOnlineAccount ? "premium" : "offline") + ") "
+                        + (data.uuid != null ? data.uuid.toString().substring(0, 8) : "?"));
+            }
+            return null;
+        }
+        if (all.size() == 1) {
+            nameResolver.resolve(all.get(0));
+            return all.get(0);
+        }
+        return null;
+    }
+
     private boolean resetPassword(CommandSender sender, String[] args) {
         if (args.length != 3) {
             sender.sendMessage(ChatColor.RED + "Usage: /heos resetpassword <player> <newPassword>");
             return true;
         }
-        String username = args[1];
-        String password = args[2];
-        FoliaPlayerData data = storage.load(username);
-        if (!data.isRegistered()) {
-            sender.sendMessage(ChatColor.RED + "Player " + username + " is not registered");
+        FoliaPlayerData data = resolvePlayer(args[1], sender);
+        if (data == null) {
+            sender.sendMessage(ChatColor.RED + "Player " + args[1] + " not found or name is ambiguous.");
             return true;
         }
+        if (!data.isRegistered()) {
+            sender.sendMessage(ChatColor.RED + "Player " + data.effectiveDisplayName() + " is not registered");
+            return true;
+        }
+        String password = args[2];
         data.passwordHash = FoliaPasswordHasher.hashPassword(password);
         storage.save(data);
-        sender.sendMessage(ChatColor.GREEN + "Reset password for player " + username);
+        sender.sendMessage(ChatColor.GREEN + "Reset password for player " + data.effectiveDisplayName());
 
-        Player online = Bukkit.getPlayerExact(username);
+        Player online = Bukkit.getPlayer(data.uuid);
         if (online != null) {
             online.sendMessage(ChatColor.YELLOW + "Your password was reset by an administrator");
             online.sendMessage(ChatColor.YELLOW + "New password: " + password);
@@ -138,13 +185,20 @@ public final class FoliaAdminCommands implements CommandExecutor, TabCompleter {
             sender.sendMessage(ChatColor.RED + "Usage: /heos info <player>");
             return true;
         }
-        FoliaPlayerData data = storage.load(args[1]);
+        FoliaPlayerData data = resolvePlayer(args[1], sender);
+        if (data == null) {
+            sender.sendMessage(ChatColor.RED + "Player " + args[1] + " not found or name is ambiguous.");
+            return true;
+        }
         if (!data.isRegistered()) {
-            sender.sendMessage(ChatColor.RED + "Player " + args[1] + " is not registered");
+            sender.sendMessage(ChatColor.RED + "Player " + data.effectiveDisplayName() + " is not registered");
             return true;
         }
         sender.sendMessage(ChatColor.GRAY + "=================================");
-        sender.sendMessage(ChatColor.YELLOW + "Player info: " + data.username);
+        sender.sendMessage(ChatColor.YELLOW + "Player info: " + data.effectiveDisplayName());
+        if (data.hasNameConflict) {
+            sender.sendMessage(ChatColor.GRAY + "Original name: " + data.username);
+        }
         sender.sendMessage(ChatColor.GRAY + "UUID: " + (data.uuid == null ? "unknown" : data.uuid));
         sender.sendMessage(ChatColor.GRAY + "Last IP: " + (data.lastIp == null || data.lastIp.isBlank() ? "unknown" : data.lastIp));
         sender.sendMessage(ChatColor.GRAY + "Registered at: " + (data.registeredTime > 0L ? new Date(data.registeredTime) : "unknown"));
@@ -165,6 +219,14 @@ public final class FoliaAdminCommands implements CommandExecutor, TabCompleter {
                     sender.sendMessage(ChatColor.RED + "Usage: /heos whitelist add <player>");
                     return true;
                 }
+                // Try resolve to UUID for precise whitelisting
+                FoliaPlayerData data = resolvePlayer(args[2], sender);
+                if (data != null && data.uuid != null) {
+                    if (whitelistData.add(data.uuid)) {
+                        sender.sendMessage(ChatColor.GREEN + "Added " + data.effectiveDisplayName() + " (UUID) to whitelist");
+                        return true;
+                    }
+                }
                 if (whitelistData.add(args[2])) {
                     sender.sendMessage(ChatColor.GREEN + "Added " + args[2] + " to whitelist");
                 } else {
@@ -177,7 +239,15 @@ public final class FoliaAdminCommands implements CommandExecutor, TabCompleter {
                     sender.sendMessage(ChatColor.RED + "Usage: /heos whitelist remove <player>");
                     return true;
                 }
-                if (whitelistData.remove(args[2])) {
+                FoliaPlayerData data = resolvePlayer(args[2], sender);
+                boolean removed = false;
+                if (data != null && data.uuid != null) {
+                    removed = whitelistData.removeByUuid(data.uuid);
+                }
+                if (!removed) {
+                    removed = whitelistData.remove(args[2]);
+                }
+                if (removed) {
                     sender.sendMessage(ChatColor.GREEN + "Removed " + args[2] + " from whitelist");
                 } else {
                     sender.sendMessage(ChatColor.RED + "Player is not in whitelist: " + args[2]);
@@ -185,9 +255,17 @@ public final class FoliaAdminCommands implements CommandExecutor, TabCompleter {
                 return true;
             }
             case "list" -> {
-                sender.sendMessage(ChatColor.YELLOW + "Whitelist size: " + whitelistData.usernames.size());
+                sender.sendMessage(ChatColor.YELLOW + "Whitelist size: " + whitelistData.usernames.size()
+                        + (whitelistData.uuids != null ? " + " + whitelistData.uuids.size() + " UUIDs" : ""));
                 if (!whitelistData.usernames.isEmpty()) {
-                    sender.sendMessage(ChatColor.GRAY + String.join(", ", whitelistData.usernames));
+                    sender.sendMessage(ChatColor.GRAY + "Names: " + String.join(", ", whitelistData.usernames));
+                }
+                if (whitelistData.uuids != null && !whitelistData.uuids.isEmpty()) {
+                    List<String> shortUuids = new ArrayList<>();
+                    for (String id : whitelistData.uuids) {
+                        shortUuids.add(id.substring(0, Math.min(id.length(), 8)));
+                    }
+                    sender.sendMessage(ChatColor.GRAY + "UUIDs: " + String.join(", ", shortUuids));
                 }
                 return true;
             }
@@ -200,16 +278,24 @@ public final class FoliaAdminCommands implements CommandExecutor, TabCompleter {
     @Override
     public List<String> onTabComplete(CommandSender sender, Command command, String alias, String[] args) {
         if (args.length == 1) {
+            List<String> subs = new ArrayList<>();
+            subs.add("login"); subs.add("register"); subs.add("changepassword");
+            subs.add("bind");
             if (sender.hasPermission("heos.admin")) {
-                return filter(List.of("login", "register", "changepassword", "ban", "ban-ip", "unban", "unban-ip", "banlist", "resetpassword", "info", "whitelist", "migrate", "reload"), args[0]);
+                subs.add("ban"); subs.add("ban-ip"); subs.add("unban"); subs.add("unban-ip");
+                subs.add("banlist"); subs.add("resetpassword"); subs.add("info");
+                subs.add("whitelist"); subs.add("migrate"); subs.add("reload");
             }
-            return filter(List.of("login", "register", "changepassword"), args[0]);
+            return filter(subs, args[0]);
         }
         if (args.length == 2 && args[0].equalsIgnoreCase("whitelist")) {
             if (!sender.hasPermission("heos.admin")) {
                 return Collections.emptyList();
             }
             return filter(List.of("add", "remove", "list"), args[1]);
+        }
+        if (args.length == 2 && args[0].equalsIgnoreCase("bind")) {
+            return bindCommands.onTabComplete(sender, command, alias, shiftArgs(args));
         }
         if ((args.length == 2 && (args[0].equalsIgnoreCase("resetpassword") || args[0].equalsIgnoreCase("info")))
                 || (args.length == 3 && args[0].equalsIgnoreCase("whitelist") && !args[1].equalsIgnoreCase("list"))) {
@@ -247,5 +333,9 @@ public final class FoliaAdminCommands implements CommandExecutor, TabCompleter {
             }
         }
         return result;
+    }
+
+    private static String ambiguousNameMsg(String name) {
+        return heos.folia.utils.FoliaMessages.nameAmbiguous(name);
     }
 }

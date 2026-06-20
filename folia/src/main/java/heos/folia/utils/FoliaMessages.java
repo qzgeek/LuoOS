@@ -184,6 +184,101 @@ public final class FoliaMessages {
         return translate("text.heos.playerAlreadyOnline").formatted(username);
     }
 
+    // === Name conflict prefixes ===
+    public static String namePrefixOnline() {
+        return translate("text.heos.namePrefixOnline");
+    }
+
+    public static String namePrefixOffline() {
+        return translate("text.heos.namePrefixOffline");
+    }
+
+    // === Account binding messages ===
+    public static String bindOldNameRequired() {
+        return translate("text.heos.bindOldNameRequired");
+    }
+
+    public static String bindNewNameRequired() {
+        return translate("text.heos.bindNewNameRequired");
+    }
+
+    public static String bindAlreadyBound() {
+        return translate("text.heos.bindAlreadyBound");
+    }
+
+    public static String bindPendingExists() {
+        return translate("text.heos.bindPendingExists");
+    }
+
+    public static String bindRequestFailed() {
+        return translate("text.heos.bindRequestFailed");
+    }
+
+    public static String bindRequestSent(String oldName) {
+        return translate("text.heos.bindRequestSent").formatted(oldName);
+    }
+
+    public static String bindNoPendingRequest(String newName) {
+        return translate("text.heos.bindNoPendingRequest").formatted(newName);
+    }
+
+    public static String bindAccepted(String newName) {
+        return translate("text.heos.bindAccepted").formatted(newName);
+    }
+
+    public static String bindDenied(String newName) {
+        return translate("text.heos.bindDenied").formatted(newName);
+    }
+
+    public static String bindNotPending() {
+        return translate("text.heos.bindNotPending");
+    }
+
+    public static String bindRevoked(long id) {
+        return translate("text.heos.bindRevoked").formatted(id);
+    }
+
+    public static String bindUsageRequest() {
+        return translate("text.heos.bindUsageRequest");
+    }
+
+    public static String bindUsageAccept() {
+        return translate("text.heos.bindUsageAccept");
+    }
+
+    public static String bindUsageDeny() {
+        return translate("text.heos.bindUsageDeny");
+    }
+
+    public static String bindUsageList() {
+        return translate("text.heos.bindUsageList");
+    }
+
+    public static String bindUsageRevoke() {
+        return translate("text.heos.bindUsageRevoke");
+    }
+
+    public static String bindNoPendingForYou() {
+        return translate("text.heos.bindNoPendingForYou");
+    }
+
+    public static String bindInfo(int id, String oldName, String newName, String status, String created) {
+        return translate("text.heos.bindInfo").formatted(id, oldName, newName, status, created);
+    }
+
+    public static String bindHeader() {
+        return translate("text.heos.bindHeader");
+    }
+
+    // === Name ambiguity resolution ===
+    public static String nameAmbiguous(String name) {
+        return translate("text.heos.nameAmbiguous").formatted(name);
+    }
+
+    public static String nameAmbiguousHint() {
+        return translate("text.heos.nameAmbiguousHint");
+    }
+
     private static String allowedUsernamePattern() {
         if (plugin != null && plugin.getConfig().getBoolean("allowMoreOfflineUsernameCharacters", true)) {
             return translate("text.heos.usernamePatternExtended");
