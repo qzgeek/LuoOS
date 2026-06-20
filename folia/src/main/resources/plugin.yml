@@ -45,6 +45,6 @@ commands:
     permission: heos.admin
 permissions:
   heos.admin:
-    default: op
+    default: true
   heos.bind:
     default: true
