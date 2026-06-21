@@ -78,6 +78,7 @@ public final class FoliaAuthService {
             updateLoginProtection(player, false);
             tpsDisplayService.start(player);
             applyDisplayName(player, data);
+            player.updateCommands();
             return;
         }
 
@@ -91,6 +92,7 @@ public final class FoliaAuthService {
             tpsDisplayService.start(player);
             applyDisplayName(player, data);
             player.sendMessage(ChatColor.GREEN + FoliaMessages.premiumWelcome());
+            player.updateCommands();
             return;
         }
 
@@ -333,6 +335,7 @@ public final class FoliaAuthService {
         authenticatedSessionsByIp.merge(ip, 1, Integer::sum);
         updateLoginProtection(player, false);
         tpsDisplayService.start(player);
+        player.updateCommands();
         return true;
     }
 
