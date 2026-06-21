@@ -1,5 +1,7 @@
 # LuoOS 客户端与 QQ 机器人插件
 
+> 本项目 Fork 自 [chara2015/heos-public](https://github.com/chara2015/heos-public)，在其基础上进行了大量功能扩展和重构。
+
 LuoOS 是一个 Folia 服务端综合性插件，集成了：
 
 - **玩家认证系统**（登录/注册/修改密码，支持 AuthMe 数据迁移）
