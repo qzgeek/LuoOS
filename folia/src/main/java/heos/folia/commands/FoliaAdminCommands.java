@@ -48,6 +48,10 @@ public final class FoliaAdminCommands implements CommandExecutor, TabCompleter {
 
     @Override
     public boolean onCommand(CommandSender sender, Command command, String label, String[] args) {
+        // Refresh command suggestions on every use (catches mid-session OP changes)
+        if (sender instanceof Player player) {
+            player.updateCommands();
+        }
         if (args.length == 0) {
             showHelp(sender);
             return true;
