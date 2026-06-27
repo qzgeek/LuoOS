@@ -121,10 +121,11 @@ public class BotStatusService {
         catch (Exception e) { logger.warning("Card render failed: " + e.getMessage()); return null; }
     }
 
-    /** Load first image from plugins/luoos/img/ directory. */
+    /** Load first image from plugins/luoos/img/ directory, auto-create if missing. */
     private BufferedImage loadBackground() {
         java.io.File imgDir = new java.io.File(dataFolder, "img");
-        if (!imgDir.exists() || !imgDir.isDirectory()) return null;
+        if (!imgDir.exists()) imgDir.mkdirs();
+        if (!imgDir.isDirectory()) return null;
         java.io.File[] files = imgDir.listFiles((dir, name) ->
                 name.toLowerCase().endsWith(".png") || name.toLowerCase().endsWith(".jpg")
                         || name.toLowerCase().endsWith(".jpeg"));
