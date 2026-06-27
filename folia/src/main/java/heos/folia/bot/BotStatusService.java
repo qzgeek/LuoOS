@@ -133,7 +133,8 @@ public class BotStatusService {
                         || name.toLowerCase().endsWith(".jpeg"));
         if (files == null || files.length == 0) return null;
         try {
-            return ImageIO.read(files[0]);
+            // Pick a random image on each request
+            return ImageIO.read(files[new java.util.Random().nextInt(files.length)]);
         } catch (Exception e) {
             logger.warning("Failed to load background: " + e.getMessage());
             return null;
