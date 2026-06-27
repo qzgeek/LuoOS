@@ -8,9 +8,11 @@ import java.awt.image.BufferedImage;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
-import java.text.AttributedString;
-import java.util.*;
+import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
+import java.util.ArrayList;
 
 /**
  * Minecraft server status card renderer — ported from motd/status_card.py.
@@ -49,9 +51,12 @@ public class BotCardRenderer {
             "mem_warning", 50.0, "mem_danger", 80.0
     );
 
-    public BotCardRenderer(int w, int h) {
+    public BotCardRenderer(int w, int h, int bgMaskAlpha) {
         this.cw = w; this.ch = h;
-        this.theme = DEFAULT_THEME; this.threshold = DEFAULT_THRESHOLD;
+        Map<String, Color> mutableTheme = new HashMap<>(DEFAULT_THEME);
+        mutableTheme.put("main_bg_mask", new Color(0x0F, 0x25, 0x40, bgMaskAlpha));
+        this.theme = Collections.unmodifiableMap(mutableTheme);
+        this.threshold = DEFAULT_THRESHOLD;
         initFonts();
     }
 

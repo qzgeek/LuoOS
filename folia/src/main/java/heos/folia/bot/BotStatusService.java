@@ -20,14 +20,16 @@ public class BotStatusService {
     private final String description;
     private final String displayIp;
     private final java.io.File dataFolder;
+    private final int bgMaskAlpha;
 
     public BotStatusService(Logger logger, String host, int port, String displayName, String description,
-                            String displayIp, java.io.File dataFolder) {
+                            String displayIp, java.io.File dataFolder, int bgMaskAlpha) {
         this.logger = logger;
         this.displayName = displayName;
         this.description = description;
         this.displayIp = displayIp;
         this.dataFolder = dataFolder;
+        this.bgMaskAlpha = bgMaskAlpha;
     }
 
     record ServerStatus(boolean online, String version, int onlinePlayers, int maxPlayers,
@@ -88,7 +90,7 @@ public class BotStatusService {
         int online = server.getOnlinePlayers().size();
         int max = server.getMaxPlayers();
 
-        BotCardRenderer renderer = new BotCardRenderer(1500, 700);
+        BotCardRenderer renderer = new BotCardRenderer(1500, 700, bgMaskAlpha);
 
         BufferedImage icon = new BufferedImage(64, 64, BufferedImage.TYPE_INT_RGB);
         Graphics2D ig = icon.createGraphics();

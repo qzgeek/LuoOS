@@ -105,6 +105,7 @@ bot:
   mc_display_name: "LuoOS服务器"
   mc_description: "欢迎来到LuoOS"
   mc_display_ip: "127.0.0.1:25565"
+  motd_bg_mask_alpha: 140
 
 # =============================================================================
 # TPS Display / TPS 显示
