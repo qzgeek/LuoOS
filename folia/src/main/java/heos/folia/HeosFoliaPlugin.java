@@ -77,7 +77,7 @@ public final class HeosFoliaPlugin extends JavaPlugin {
         getServer().getPluginManager().registerEvents(
                 new FoliaCommandInterceptor(this, authService, banCommands), this);
         getServer().getPluginManager().registerEvents(
-                new FoliaAuthListener(this, authService, banData, whitelistData), this);
+                new FoliaAuthListener(this, authService, banData, whitelistData, storage), this);
         registerCommands(banCommands, adminCommands);
 
         if (isRecipeViewerSyncEnabled()) {

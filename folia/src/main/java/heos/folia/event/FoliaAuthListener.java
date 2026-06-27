@@ -2,6 +2,7 @@ package heos.folia.event;
 
 import heos.folia.storage.FoliaBanData;
 import heos.folia.storage.FoliaPlayerData;
+import heos.folia.storage.FoliaStorage;
 import heos.folia.storage.FoliaWhitelistData;
 import net.kyori.adventure.text.Component;
 import org.bukkit.ChatColor;
@@ -31,17 +32,23 @@ import org.bukkit.plugin.Plugin;
 import heos.folia.utils.FoliaMessages;
 import heos.folia.utils.FoliaTimeParser;
 
+import java.sql.PreparedStatement;
+import java.sql.ResultSet;
+
 public final class FoliaAuthListener implements Listener {
     private final Plugin plugin;
     private final FoliaAuthService authService;
     private final FoliaBanData banData;
     private final FoliaWhitelistData whitelistData;
+    private final FoliaStorage storage;
 
-    public FoliaAuthListener(Plugin plugin, FoliaAuthService authService, FoliaBanData banData, FoliaWhitelistData whitelistData) {
+    public FoliaAuthListener(Plugin plugin, FoliaAuthService authService, FoliaBanData banData,
+                             FoliaWhitelistData whitelistData, FoliaStorage storage) {
         this.plugin = plugin;
         this.authService = authService;
         this.banData = banData;
         this.whitelistData = whitelistData;
+        this.storage = storage;
     }
 
     @EventHandler(priority = EventPriority.HIGHEST)
@@ -56,20 +63,27 @@ public final class FoliaAuthListener implements Listener {
             return;
         }
 
-        // Whitelist check — by UUID first, then by name
+        // Whitelist check — by UUID first, then by name, also check DB (QQ bot whitelist)
         if (plugin.getConfig().getBoolean("enableWhitelist", false)) {
-            if (!whitelistData.isWhitelisted(uuid) && !whitelistData.isWhitelisted(username)) {
+            if (!whitelistData.isWhitelisted(uuid) && !whitelistData.isWhitelisted(username)
+                    && !isInDbWhitelist(username)) {
                 event.disallow(AsyncPlayerPreLoginEvent.Result.KICK_WHITELIST, kickComponent(FoliaMessages.whitelistKick()));
                 plugin.getLogger().info(FoliaMessages.whitelistDeniedLog(username));
                 return;
             }
         }
 
-        // Ban check — by UUID
+        // Ban check — by UUID, also check DB (QQ bot blacklist)
         if (plugin.getConfig().getBoolean("enableCustomBan", true)) {
             FoliaBanData.BanEntry playerBan = banData.getPlayerBanByUuid(uuid);
             if (playerBan == null) {
                 playerBan = banData.getPlayerBan(username, null);
+            }
+            // Also check QQ blacklist (bot bans should prevent login too)
+            if (playerBan == null && isInDbBlacklist(username)) {
+                event.disallow(AsyncPlayerPreLoginEvent.Result.KICK_BANNED,
+                        kickComponent("你已被QQ机器人封禁"));
+                return;
             }
             if (playerBan != null) {
                 if (FoliaMessages.isMigrationReason(playerBan.reason)) {
@@ -231,6 +245,38 @@ public final class FoliaAuthListener implements Listener {
     void onDamage(EntityDamageByEntityEvent event) {
         if (event.getDamager() instanceof Player player && authService.shouldBlock(player)) {
             event.setCancelled(true);
+        }
+    }
+
+    /** Check if the player name exists in the QQ bot whitelist database table. */
+    private boolean isInDbWhitelist(String username) {
+        try {
+            var conn = storage.getConnection();
+            PreparedStatement ps = conn.prepareStatement(
+                    "SELECT 1 FROM qq_whitelist WHERE LOWER(player_name) = ?");
+            ps.setString(1, username.toLowerCase());
+            ResultSet rs = ps.executeQuery();
+            return rs.next();
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
+    /** Check if the player has an active QQ bot blacklist entry. */
+    private boolean isInDbBlacklist(String username) {
+        try {
+            var conn = storage.getConnection();
+            // Find QQ that owns this player name, then check blacklist
+            PreparedStatement ps = conn.prepareStatement(
+                    "SELECT b.qq FROM qq_blacklist b " +
+                    "INNER JOIN qq_whitelist w ON b.qq = w.qq " +
+                    "WHERE LOWER(w.player_name) = ? AND (b.expiry = 0 OR b.expiry > ?)");
+            ps.setString(1, username.toLowerCase());
+            ps.setLong(2, System.currentTimeMillis());
+            ResultSet rs = ps.executeQuery();
+            return rs.next();
+        } catch (Exception e) {
+            return false;
         }
     }
 }
