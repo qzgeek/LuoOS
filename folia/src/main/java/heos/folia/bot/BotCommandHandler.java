@@ -44,7 +44,7 @@ public class BotCommandHandler {
     private final java.util.Random random = new java.util.Random();
 
     // --- Patterns ---
-    private static final Pattern APPLY = Pattern.compile("^(申请白名单|白名单|添加白名单)\\s+(\\S+)$");
+    private static final Pattern APPLY = Pattern.compile("^(申请白名单|白名单|添加白名单)\\s*(\\S+)$");
     private static final Pattern DELETE = Pattern.compile("^(删除白名单|移除白名单)\\s+(\\S+)$");
     private static final Pattern QUERY_SIMPLE = Pattern.compile("^(查询白名单|查询|查看|查看白名单)$");
     private static final Pattern QUERY_ARGS  = Pattern.compile("^(查询白名单|查询|查看|查看白名单)\\s+(.+)$");
