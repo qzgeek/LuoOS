@@ -163,7 +163,17 @@ public final class FoliaAuthService {
     }
 
     public boolean shouldBlock(Player player) {
+        if (isBypassedPlayer(player)) return false;
         return isAuthenticationEnabled() && !isAuthenticated(player);
+    }
+
+    private boolean isBypassedPlayer(Player player) {
+        var names = plugin.getConfig().getStringList("loginBypassNames");
+        String name = player.getName();
+        for (String bn : names) {
+            if (name.equals(bn.trim()) || name.startsWith(bn.trim())) return true;
+        }
+        return false;
     }
 
     public boolean isAuthenticationEnabled() {
