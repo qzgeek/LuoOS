@@ -1,34 +1,20 @@
-# gradle
-
-remapped/
-
-.gradle/
+# Build
 build/
-out/
-classes/
+.gradle/
+folia/build/
+folia/versions/*/build/
+*.jar
+!gradle/wrapper/gradle-wrapper.jar
 
-# idea
-
+# IDE
 .idea/
 *.iml
-*.ipr
-*.iws
-
-# vscode
-
-.settings/
 .vscode/
-bin/
-.classpath
-.project
 
-# fabric
+# Local test configs (sensitive)
+*-local.yml
+*.local.properties
 
-run/
-/versions/*/src/
-
-# local server data
-server/heos/
-**/server/heos/
-**/heos/secret.key
-**/heos/player_data.db*
+# OS
+.DS_Store
+Thumbs.db

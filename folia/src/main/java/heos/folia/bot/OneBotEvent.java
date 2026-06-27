@@ -74,7 +74,10 @@ public class OneBotEvent {
 
     public CompletableFuture<JsonObject> callApiAsync(String action, String params) {
         OneBotSession session = server.sessions.get(clientId);
-        if (session == null) return CompletableFuture.failedFuture(new RuntimeException("No session"));
+        if (session == null) {
+            server.logger.warning("[Bot] callApiAsync: no session for clientId=" + clientId);
+            return CompletableFuture.failedFuture(new RuntimeException("No session"));
+        }
 
         String echo = String.valueOf(System.nanoTime());
         CompletableFuture<JsonObject> future = new CompletableFuture<>();
@@ -87,7 +90,14 @@ public class OneBotEvent {
     }
 
     public void callApi(String action, String params) {
-        callApiAsync(action, params).exceptionally(e -> null);
+        try {
+            callApiAsync(action, params).exceptionally(e -> {
+                server.logger.warning("[Bot] API call failed: " + action + " - " + e.getMessage());
+                return null;
+            });
+        } catch (Exception e) {
+            server.logger.warning("[Bot] API call exception: " + action + " - " + e.getMessage());
+        }
     }
 
     private static String escape(String s) {

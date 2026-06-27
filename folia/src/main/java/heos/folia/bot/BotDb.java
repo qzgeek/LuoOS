@@ -74,8 +74,10 @@ public class BotDb {
     public void addWhitelist(long qq, String playerName, String playerUuid) {
         try {
             var conn = storage.getConnection();
-            PreparedStatement ps = conn.prepareStatement(
-                    "INSERT OR IGNORE INTO qq_whitelist (qq, player_name, player_uuid, added_at) VALUES (?, ?, ?, ?)");
+            String sql = storage.isMySQL()
+                    ? "INSERT IGNORE INTO qq_whitelist (qq, player_name, player_uuid, added_at) VALUES (?, ?, ?, ?)"
+                    : "INSERT OR IGNORE INTO qq_whitelist (qq, player_name, player_uuid, added_at) VALUES (?, ?, ?, ?)";
+            PreparedStatement ps = conn.prepareStatement(sql);
             ps.setLong(1, qq);
             ps.setString(2, playerName);
             ps.setString(3, playerUuid);

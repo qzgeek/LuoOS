@@ -52,6 +52,11 @@ public final class FoliaStorage {
         this.root = root;
     }
 
+    /** Returns true if MySQL/MariaDB backend is configured. */
+    public boolean isMySQL() {
+        return useMySQL;
+    }
+
     /** Configure MySQL connection. Call before initialize(). */
     public void configureMySQL(String url, String user, String password) {
         this.useMySQL = true;

@@ -13,7 +13,7 @@ import java.util.function.Consumer;
 import java.util.logging.Logger;
 
 public class OneBotServer extends WebSocketServer {
-    private final Logger logger;
+    final Logger logger;
     private final String accessToken;
     private Consumer<OneBotEvent> eventHandler;
     final Map<String, OneBotSession> sessions = new ConcurrentHashMap<>();
@@ -34,6 +34,9 @@ public class OneBotServer extends WebSocketServer {
 
     @Override
     public void onOpen(WebSocket conn, ClientHandshake handshake) {
+        logger.info("[Bot] Incoming connection from " + conn.getRemoteSocketAddress()
+                + ", path=" + handshake.getResourceDescriptor()
+                + ", auth=" + handshake.getFieldValue("Authorization"));
         if (accessToken != null && !accessToken.isEmpty()) {
             String tok = handshake.getFieldValue("Authorization");
             if (tok != null && tok.startsWith("Bearer ")) tok = tok.substring(7).trim();

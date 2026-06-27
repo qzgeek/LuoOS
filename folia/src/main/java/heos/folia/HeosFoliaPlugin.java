@@ -101,6 +101,8 @@ public final class HeosFoliaPlugin extends JavaPlugin {
             String statusTrigger = getConfig().getString("bot.status_trigger", "服务器还活着吗");
             int rateMax = getConfig().getInt("bot.rate_limit_max", 3);
             int rateWindow = getConfig().getInt("bot.rate_limit_window", 60);
+            int delayMin = getConfig().getInt("bot.reply_delay_min_ms", 1000);
+            int delayMax = getConfig().getInt("bot.reply_delay_max_ms", 2000);
 
             String mcHost = getConfig().getString("bot.mc_host", "127.0.0.1");
             int mcPort = getConfig().getInt("bot.mc_port", 25565);
@@ -109,15 +111,55 @@ public final class HeosFoliaPlugin extends JavaPlugin {
             BotStatusService statusService = new BotStatusService(getLogger(), mcHost, mcPort, mcName, mcDesc);
 
             BotDb botDb = new BotDb(getLogger(), storage);
-            BotCommandHandler botHandler = new BotCommandHandler(
-                    getLogger(), botDb, storage, statusService,
-                    maxPerQq, idChars, maxIdLen, groups,
-                    statusTrigger, rateMax, rateWindow);
+            try {
+                BotCommandHandler botHandler = new BotCommandHandler(
+                        getLogger(), botDb, storage, statusService,
+                        maxPerQq, idChars, maxIdLen, groups,
+                        statusTrigger, rateMax, rateWindow,
+                        delayMin, delayMax);
 
-            botServer = new OneBotServer(getLogger(), botHost, botPort, botToken);
-            botServer.setEventHandler(event -> botHandler.handle(event));
-            new Thread(botServer::startServer, "LuoOS-Bot").start();
-            getLogger().info("OneBot server started on ws://" + botHost + ":" + botPort);
+                botServer = new OneBotServer(getLogger(), botHost, botPort, botToken);
+                botServer.setEventHandler(event -> botHandler.handle(event));
+                new Thread(botServer::startServer, "LuoOS-Bot").start();
+                getLogger().info("OneBot server started on ws://" + botHost + ":" + botPort);
+            } catch (Exception e) {
+                getLogger().severe("Failed to start OneBot server: " + e.getMessage());
+                e.printStackTrace();
+            }
+        }
+
+        // Auto-detect and PERMANENTLY disable AuthMe to prevent authentication conflicts.
+        // LuoOS provides its own complete auth system (login/register/password management).
+        // Having both AuthMe and LuoOS enabled causes duplicate login/register prompts
+        // and inconsistent authentication state.
+        if (getConfig().getBoolean("enableAuthentication", true)) {
+            org.bukkit.plugin.Plugin authMe = getServer().getPluginManager().getPlugin("AuthMe");
+            if (authMe != null && authMe.isEnabled()) {
+                getLogger().warning("========================================");
+                getLogger().warning("AuthMe detected! LuoOS provides its own authentication system.");
+                getLogger().warning("AuthMe will be permanently disabled to prevent conflicts.");
+                getLogger().warning("Players should use /los login and /los register instead.");
+                getLogger().warning("========================================");
+
+                // Unload AuthMe from the current session
+                getServer().getPluginManager().disablePlugin(authMe);
+
+                // Rename AuthMe jar to prevent it from loading on next restart
+                java.io.File pluginsDir = getDataFolder().getParentFile();
+                java.io.File[] authMeJars = pluginsDir.listFiles((dir, name) ->
+                        name.startsWith("AuthMe") && name.endsWith(".jar"));
+                if (authMeJars != null) {
+                    for (java.io.File jar : authMeJars) {
+                        java.io.File disabled = new java.io.File(jar.getParentFile(), jar.getName() + ".disabled_by_luoos");
+                        if (jar.renameTo(disabled)) {
+                            getLogger().info("Permanently disabled: " + jar.getName() + " -> " + disabled.getName());
+                        } else {
+                            getLogger().warning("Failed to rename: " + jar.getName() + " — please remove it manually");
+                        }
+                    }
+                }
+                getLogger().info("AuthMe has been disabled. Use /los migrate-authme to import AuthMe accounts.");
+            }
         }
 
         getLogger().info("Heos Folia enabled (UUID-based + Account Binding + Group Concurrency)");
