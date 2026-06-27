@@ -115,10 +115,32 @@ public class BotCardRenderer {
             g.drawImage(scaled, iconX, iconY, null);
         }
 
-        // Text area
-        int totalLines = BASE_LINES + playerLines.size();
-        int textStartY = iconY + ICON_H / 2 - (totalLines * LINE_GAP) / 2;
+        // Text area — calculate actual player name lines first for correct centering
         int textX = iconX + ICON_W + 45;
+        int playerNameLines = 0;
+        if (!playerLines.isEmpty()) {
+            FontMetrics fm = g.getFontMetrics(normalFont);
+            int maxWidth = cw - textX - 80;
+            int lineWidth = 0;
+            StringBuilder simLine = new StringBuilder();
+            for (int i = 0; i < playerLines.size(); i++) {
+                String name = playerLines.get(i);
+                String sep = (i == playerLines.size() - 1) ? "" : "、";
+                String segment = name + sep;
+                int segW = fm.stringWidth(segment);
+                if (simLine.length() > 0 && lineWidth + segW > maxWidth) {
+                    playerNameLines++;
+                    simLine.setLength(0);
+                    lineWidth = 0;
+                }
+                simLine.append(segment);
+                lineWidth += segW;
+            }
+            if (simLine.length() > 0) playerNameLines++;
+        }
+
+        int totalLines = BASE_LINES + playerNameLines;
+        int textStartY = iconY + ICON_H / 2 - (totalLines * LINE_GAP) / 2;
         int y = textStartY;
 
         // Line 1: Server name
