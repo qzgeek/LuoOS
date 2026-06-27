@@ -238,7 +238,7 @@ public class BotCommandHandler {
         String txt = "LuoOS Bot 命令帮助\n\n"
             + "申请白名单/白名单/添加白名单 <ID>  申请白名单\n"
             + "删除白名单/移除白名单 <ID>        删除自己的白名单\n"
-            + "查询白名单/查询/查看 [name/QQ]    查看白名单\n"
+            + "查询白名单/查询/查看              查看自己的白名单\n"
             + "服务器还活着吗/服务器状态         查看服务器状态\n"
             + "help/帮助/菜单                    显示此帮助\n\n"
             + "——管理员——\n"
@@ -304,62 +304,14 @@ public class BotCommandHandler {
         event.react(true);
     }
 
-    // ======================== Query (self / other / reverse) ========================
+    // ======================== Query (self only — privacy) ========================
 
     /**
      * query(null)  = show own whitelist
-     * query(QQ#)   = show that QQ's whitelist
-     * query("name") = show which QQ owns that game ID (reverse lookup)
+     * query(anything else) = show own whitelist only (privacy: bindings are private)
      */
     private void handleQuery(long qq, String arg, OneBotEvent event) {
-        if (arg == null || arg.isEmpty()) {
-            showWhitelist(qq, "你", event);
-            return;
-        }
-
-        // Try extract QQ from @mention first
-        long targetQq = extractTargetQq(arg, event);
-        if (targetQq > 0) {
-            showWhitelist(targetQq, "QQ" + targetQq, event);
-            return;
-        }
-
-        // Try numeric
-        try {
-            targetQq = Long.parseLong(arg.replaceAll("[^0-9]", ""));
-            if (targetQq > 10000) {
-                showWhitelist(targetQq, "QQ" + targetQq, event);
-                return;
-            }
-        } catch (NumberFormatException ignored) {}
-
-        // Strip CQ codes and quotes
-        String name = arg.replaceAll("\\[CQ:[^]]+\\]", "").trim();
-        name = name.replaceAll("^[\"'\\u201c\\u201d\\u2018\\u2019]", "").replaceAll("[\"'\\u201c\\u201d\\u2018\\u2019]$", "");
-
-        // Reverse lookup: find QQ(s) that own this game ID
-        try {
-            var conn = storage.getConnection();
-            var ps = conn.prepareStatement("SELECT qq, player_uuid FROM qq_whitelist WHERE LOWER(player_name) = ?");
-            ps.setString(1, name.toLowerCase());
-            var rs = ps.executeQuery();
-            List<String> found = new ArrayList<>();
-            while (rs.next()) {
-                long ownerQq = rs.getLong("qq");
-                String uid = rs.getString("player_uuid");
-                found.add("QQ" + ownerQq + (uid != null && !uid.isEmpty() ? " (UUID:" + uid.substring(0, 8) + "...)" : ""));
-            }
-            if (found.isEmpty()) {
-                event.replyAt("未找到 " + name + " 的白名单记录");
-            } else {
-                event.replyAt("游戏ID " + name + " 的绑定信息:\n" + String.join("\n", found));
-            }
-            event.react(true);
-        } catch (Exception e) {
-            logger.warning("[BotHandler] Reverse query failed: " + e.getMessage());
-            event.replyAt("查询失败");
-            event.react(false);
-        }
+        showWhitelist(qq, "你", event);
     }
 
     private void showWhitelist(long targetQq, String label, OneBotEvent event) {
