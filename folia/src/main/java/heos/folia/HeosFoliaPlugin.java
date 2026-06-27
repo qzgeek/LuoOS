@@ -120,6 +120,9 @@ public final class HeosFoliaPlugin extends JavaPlugin {
                         delayMin, delayMax);
 
                 botServer = new OneBotServer(getLogger(), botHost, botPort, botToken);
+                boolean botDebug = getConfig().getBoolean("bot.debug_log", false);
+                botServer.setDebugLog(botDebug);
+                botHandler.setDebugLog(botDebug);
                 botServer.setEventHandler(event -> botHandler.handle(event));
                 new Thread(botServer::startServer, "LuoOS-Bot").start();
                 getLogger().info("OneBot server started on ws://" + botHost + ":" + botPort);

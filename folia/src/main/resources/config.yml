@@ -99,6 +99,7 @@ bot:
   rate_limit_window: 60
   reply_delay_min_ms: 1000
   reply_delay_max_ms: 2000
+  debug_log: false
   mc_host: 127.0.0.1
   mc_port: 25565
   mc_display_name: "LuoOS服务器"

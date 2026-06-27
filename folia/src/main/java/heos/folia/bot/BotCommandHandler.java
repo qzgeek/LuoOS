@@ -43,6 +43,9 @@ public class BotCommandHandler {
     private final int delayMaxMs;
     private final java.util.Random random = new java.util.Random();
 
+    boolean debugLog = false;
+    public void setDebugLog(boolean d) { this.debugLog = d; }
+
     // --- Patterns ---
     private static final Pattern APPLY = Pattern.compile("^(申请白名单|白名单|添加白名单)\\s*(\\S+)$");
     private static final Pattern DELETE = Pattern.compile("^(删除白名单|移除白名单)\\s+(\\S+)$");
@@ -115,7 +118,7 @@ public class BotCommandHandler {
         String role = event.senderRole();
         boolean isAdmin = "admin".equals(role) || "owner".equals(role);
 
-        logger.info("[BotHandler] QQ" + qq + " group=" + groupId + " role=" + role + ": " + text);
+        if (debugLog) logger.info("[BotHandler] QQ" + qq + " group=" + groupId + " role=" + role + ": " + text);
 
         // Global rate limit (admins bypass, silent ignore)
         if (!isAdmin && !checkRate(groupId)) {

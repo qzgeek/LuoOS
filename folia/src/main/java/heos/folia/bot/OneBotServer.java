@@ -17,6 +17,7 @@ public class OneBotServer extends WebSocketServer {
     private final String accessToken;
     private Consumer<OneBotEvent> eventHandler;
     final Map<String, OneBotSession> sessions = new ConcurrentHashMap<>();
+    boolean debugLog = false;
 
     public OneBotServer(Logger logger, String host, int port, String accessToken) {
         super(new InetSocketAddress(host, port));
@@ -26,6 +27,7 @@ public class OneBotServer extends WebSocketServer {
     }
 
     public void setEventHandler(Consumer<OneBotEvent> h) { this.eventHandler = h; }
+    public void setDebugLog(boolean debug) { this.debugLog = debug; }
 
     @Override
     public void onStart() {
@@ -34,7 +36,7 @@ public class OneBotServer extends WebSocketServer {
 
     @Override
     public void onOpen(WebSocket conn, ClientHandshake handshake) {
-        logger.info("[Bot] Incoming connection from " + conn.getRemoteSocketAddress()
+        if (debugLog) logger.info("[Bot] Incoming connection from " + conn.getRemoteSocketAddress()
                 + ", path=" + handshake.getResourceDescriptor()
                 + ", auth=" + handshake.getFieldValue("Authorization"));
         if (accessToken != null && !accessToken.isEmpty()) {
@@ -51,7 +53,7 @@ public class OneBotServer extends WebSocketServer {
         }
         String cid = conn.getRemoteSocketAddress().toString().replace("/", "");
         sessions.put(cid, new OneBotSession(conn, cid));
-        logger.info("[Bot] Connected: " + cid);
+        if (debugLog) logger.info("[Bot] Connected: " + cid);
     }
 
     @Override
@@ -67,7 +69,7 @@ public class OneBotServer extends WebSocketServer {
         if (s == null) return;
 
         try {
-            logger.info("[Bot] RX: " + (text.length() > 200 ? text.substring(0, 200) + "..." : text));
+            if (debugLog) logger.info("[Bot] RX: " + (text.length() > 200 ? text.substring(0, 200) + "..." : text));
             JsonObject json = new com.google.gson.Gson().fromJson(text, JsonObject.class);
             if (json == null) return;
 
@@ -85,7 +87,7 @@ public class OneBotServer extends WebSocketServer {
                 return;
             }
             if (json.has("action")) {
-                logger.info("[Bot] API action: " + json.get("action").getAsString());
+                if (debugLog) logger.info("[Bot] API action: " + json.get("action").getAsString());
                 handleApiAction(s.clientId, json);
                 return;
             }

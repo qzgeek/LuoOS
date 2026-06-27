@@ -139,18 +139,27 @@ public final class FoliaLoginUsernameValidationBypassService implements AutoClos
         // 1) Reject banned / not-whitelisted (stays at Netty level)
         if (rejectHeosLogin(ch, username)) return true;
 
-        // 2) For non-standard usernames (Chinese etc.), still need offline bypass
+        // 2) For non-standard usernames (Chinese etc.), or bound accounts — offline bypass
         boolean allowOffline = plugin.getConfig().getBoolean("allowOfflinePlayers", true);
         boolean isStandard = FoliaMojangApi.isValidMojangUsername(username);
+        UUID effectiveUuid = resolveBindingUuid(username);
 
-        if (allowOffline && !isStandard) {
-            UUID effectiveUuid = resolveBindingUuid(username);
+        if (effectiveUuid == null) {
+            // Binding group online conflict — already logged in resolveBindingUuid
+            disconnectLogin(ch, FoliaMessages.bindGroupOnline(username));
+            return true;
+        }
+
+        if (allowOffline && (!isStandard || !effectiveUuid.equals(offlineUuid(username)))) {
+            // Fire pre-login event so plugins (LuckPerms) can load data before bypass
+            if (!fireAsyncPreLogin(ch, username, effectiveUuid)) {
+                return true; // event denied
+            }
             acceptOfflineLogin(ch, username, effectiveUuid);
             return true;
         }
 
-        // 3) Standard username — let vanilla process (triggers AsyncPlayerPreLoginEvent etc.)
-        //    Account binding UUID remapping happens in FoliaAuthListener
+        // 3) Standard username, no binding — let vanilla process
         return false;
     }
 
@@ -285,6 +294,27 @@ public final class FoliaLoginUsernameValidationBypassService implements AutoClos
     }
 
     // === Reflection ===
+
+    /**
+     * Fire AsyncPlayerPreLoginEvent so plugins (LuckPerms) can load data.
+     * Returns true if allowed, false if event was denied (disconnect already sent).
+     */
+    @SuppressWarnings("deprecation")
+    private boolean fireAsyncPreLogin(Channel ch, String username, UUID uuid) {
+        try {
+            java.net.InetAddress addr = java.net.InetAddress.getByName(channelIp(ch));
+            var event = new org.bukkit.event.player.AsyncPlayerPreLoginEvent(username, addr, uuid);
+            org.bukkit.Bukkit.getServer().getPluginManager().callEvent(event);
+            if (event.getLoginResult() != org.bukkit.event.player.AsyncPlayerPreLoginEvent.Result.ALLOWED) {
+                String msg = event.getKickMessage();
+                disconnectLogin(ch, msg != null ? msg : "Login denied");
+                return false;
+            }
+        } catch (Exception e) {
+            plugin.getLogger().log(Level.FINE, "Failed to fire pre-login event for " + username, e);
+        }
+        return true;
+    }
 
     private Object findPacketListener(Object conn) {
         for (Class<?> t = conn.getClass(); t != null; t = t.getSuperclass()) {
