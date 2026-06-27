@@ -2,6 +2,7 @@ package heos.folia.utils;
 
 import heos.folia.storage.FoliaAccountBinding;
 import heos.folia.storage.FoliaBanData;
+import heos.folia.storage.FoliaStorage;
 import heos.folia.storage.FoliaWhitelistData;
 import io.netty.channel.Channel;
 import io.netty.channel.ChannelDuplexHandler;
@@ -14,6 +15,8 @@ import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
+import java.sql.PreparedStatement;
+import java.sql.ResultSet;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.IdentityHashMap;
@@ -38,15 +41,18 @@ public final class FoliaLoginUsernameValidationBypassService implements AutoClos
     private final FoliaBanData banData;
     private final FoliaWhitelistData whitelistData;
     private final FoliaAccountBinding accountBinding;
+    private final FoliaStorage storage;
     private final Set<Channel> serverChannels = Collections.newSetFromMap(new IdentityHashMap<>());
 
     public FoliaLoginUsernameValidationBypassService(Plugin plugin, FoliaBanData banData,
                                                       FoliaWhitelistData whitelistData,
-                                                      FoliaAccountBinding accountBinding) {
+                                                      FoliaAccountBinding accountBinding,
+                                                      FoliaStorage storage) {
         this.plugin = plugin;
         this.banData = banData;
         this.whitelistData = whitelistData;
         this.accountBinding = accountBinding;
+        this.storage = storage;
     }
 
     public void install() {
@@ -178,10 +184,37 @@ public final class FoliaLoginUsernameValidationBypassService implements AutoClos
     }
 
     private boolean rejectWhitelist(String username, Channel ch) {
-        if (!plugin.getConfig().getBoolean("enableWhitelist", false) || whitelistData.isWhitelisted(username))
+        // Always check DB whitelist (QQ bot whitelist) — single source of truth
+        if (isInDbWhitelist(username)) return false;
+        // Fallback: JSON whitelist (legacy)
+        if (plugin.getConfig().getBoolean("enableWhitelist", false) && whitelistData.isWhitelisted(username))
             return false;
-        disconnectLogin(ch, FoliaMessages.whitelistKick());
-        return true;
+        // DB has entries = whitelist is active, deny those not in it
+        if (dbWhitelistHasEntries()) {
+            disconnectLogin(ch, "你不在白名单中，请先在QQ群中申请");
+            return true;
+        }
+        return false;
+    }
+
+    private boolean isInDbWhitelist(String username) {
+        try {
+            var conn = storage.getConnection();
+            PreparedStatement ps = conn.prepareStatement(
+                    "SELECT 1 FROM qq_whitelist WHERE LOWER(player_name) = ?");
+            ps.setString(1, username.toLowerCase());
+            ResultSet rs = ps.executeQuery();
+            return rs.next();
+        } catch (Exception e) { return false; }
+    }
+
+    private boolean dbWhitelistHasEntries() {
+        try {
+            var conn = storage.getConnection();
+            var ps = conn.prepareStatement("SELECT COUNT(*) FROM qq_whitelist");
+            var rs = ps.executeQuery();
+            return rs.next() && rs.getInt(1) > 0;
+        } catch (Exception e) { return false; }
     }
 
     private boolean rejectBan(String username, Channel ch) {

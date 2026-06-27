@@ -85,7 +85,7 @@ public final class HeosFoliaPlugin extends JavaPlugin {
         }
 
         this.bypassService = new FoliaLoginUsernameValidationBypassService(
-                this, banData, whitelistData, accountBinding);
+                this, banData, whitelistData, accountBinding, storage);
         bypassService.install();
 
         // OneBot QQ bot

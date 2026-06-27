@@ -63,17 +63,7 @@ public final class FoliaAuthListener implements Listener {
             return;
         }
 
-        // Whitelist check — always from DB (QQ bot whitelist), single source of truth
-        boolean dbHasEntries = dbWhitelistHasEntries();
-        if (dbHasEntries) {
-            boolean inDbWl = isInDbWhitelist(username);
-            plugin.getLogger().info("[Whitelist] inDb=" + inDbWl + " dbHasEntries=true for " + username);
-            if (!inDbWl) {
-                plugin.getLogger().info("[Whitelist] Denied (not in DB): " + username);
-                event.disallow(AsyncPlayerPreLoginEvent.Result.KICK_WHITELIST, kickComponent("你不在白名单中，请先在QQ群中申请"));
-                return;
-            }
-        }
+        // Whitelist/ban handled at Netty level by FoliaLoginUsernameValidationBypassService
 
         // Ban check — by UUID, also check DB (QQ bot blacklist)
         if (plugin.getConfig().getBoolean("enableCustomBan", true)) {
