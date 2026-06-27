@@ -5,7 +5,7 @@ package heos;
 public final class Heosmod {
     public static final String MOD_ID = "luoos";
     public static final String MOD_NAME = "LuoOS";
-    public static final String MOD_VERSION = "0.06";
+    public static final String MOD_VERSION = "0.07-dev";
     public static final String MOD_DESCRIPTION = "LuoOS - Minecraft server utility mod";
     public static final String MOD_AUTHOR = "chara201x, qzgeek";
     public static final String MOD_LICENSE = "MIT";
