@@ -109,7 +109,7 @@ public final class HeosFoliaPlugin extends JavaPlugin {
             String mcName = getConfig().getString("bot.mc_display_name", "LuoOS服务器");
             String mcDesc = getConfig().getString("bot.mc_description", "欢迎来到LuoOS");
             String mcDisplayIp = getConfig().getString("bot.mc_display_ip", mcHost + ":" + mcPort);
-            BotStatusService statusService = new BotStatusService(getLogger(), mcHost, mcPort, mcName, mcDesc, mcDisplayIp);
+            BotStatusService statusService = new BotStatusService(getLogger(), mcHost, mcPort, mcName, mcDesc, mcDisplayIp, getDataFolder());
 
             BotDb botDb = new BotDb(getLogger(), storage);
             try {

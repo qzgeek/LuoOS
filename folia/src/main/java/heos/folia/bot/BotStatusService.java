@@ -19,12 +19,15 @@ public class BotStatusService {
     private final String displayName;
     private final String description;
     private final String displayIp;
+    private final java.io.File dataFolder;
 
-    public BotStatusService(Logger logger, String host, int port, String displayName, String description, String displayIp) {
+    public BotStatusService(Logger logger, String host, int port, String displayName, String description,
+                            String displayIp, java.io.File dataFolder) {
         this.logger = logger;
         this.displayName = displayName;
         this.description = description;
         this.displayIp = displayIp;
+        this.dataFolder = dataFolder;
     }
 
     record ServerStatus(boolean online, String version, int onlinePlayers, int maxPlayers,
@@ -97,10 +100,13 @@ public class BotStatusService {
                 "查询时间：" + java.time.LocalDateTime.now().toString().replace("T", " ").substring(0, 19),
                 "Write by 黔中极客 / LuoOS");
 
-        BufferedImage background = null;
-        try (InputStream is = getClass().getClassLoader().getResourceAsStream("background.png")) {
-            if (is != null) background = ImageIO.read(is);
-        } catch (Exception ignored) {}
+        BufferedImage background = loadBackground();
+        // If no custom background, try default embedded
+        if (background == null) {
+            try (InputStream is = getClass().getClassLoader().getResourceAsStream("background.png")) {
+                if (is != null) background = ImageIO.read(is);
+            } catch (Exception ignored) {}
+        }
 
         // Collect online player names
         java.util.List<String> playerNames = new ArrayList<>();
@@ -113,5 +119,21 @@ public class BotStatusService {
 
         try { return renderer.toPngBytes(card); }
         catch (Exception e) { logger.warning("Card render failed: " + e.getMessage()); return null; }
+    }
+
+    /** Load first image from plugins/luoos/img/ directory. */
+    private BufferedImage loadBackground() {
+        java.io.File imgDir = new java.io.File(dataFolder, "img");
+        if (!imgDir.exists() || !imgDir.isDirectory()) return null;
+        java.io.File[] files = imgDir.listFiles((dir, name) ->
+                name.toLowerCase().endsWith(".png") || name.toLowerCase().endsWith(".jpg")
+                        || name.toLowerCase().endsWith(".jpeg"));
+        if (files == null || files.length == 0) return null;
+        try {
+            return ImageIO.read(files[0]);
+        } catch (Exception e) {
+            logger.warning("Failed to load background: " + e.getMessage());
+            return null;
+        }
     }
 }
