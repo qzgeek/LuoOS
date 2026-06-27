@@ -310,20 +310,29 @@ public class BotCommandHandler {
      */
     private void handleQuery(long qq, String arg, OneBotEvent event) {
         if (arg == null || arg.isEmpty()) {
-            // Self query
             showWhitelist(qq, "你", event);
             return;
         }
 
-        // Try numeric = QQ lookup
-        try {
-            long targetQq = Long.parseLong(arg);
+        // Try extract QQ from @mention first
+        long targetQq = extractTargetQq(arg, event);
+        if (targetQq > 0) {
             showWhitelist(targetQq, "QQ" + targetQq, event);
             return;
+        }
+
+        // Try numeric
+        try {
+            targetQq = Long.parseLong(arg.replaceAll("[^0-9]", ""));
+            if (targetQq > 10000) {
+                showWhitelist(targetQq, "QQ" + targetQq, event);
+                return;
+            }
         } catch (NumberFormatException ignored) {}
 
-        // Strip quotes if present
-        String name = arg.replaceAll("^[\"'\u201c\u201d\u2018\u2019]", "").replaceAll("[\"'\u201c\u201d\u2018\u2019]$", "");
+        // Strip CQ codes and quotes
+        String name = arg.replaceAll("\\[CQ:[^]]+\\]", "").trim();
+        name = name.replaceAll("^[\"'\\u201c\\u201d\\u2018\\u2019]", "").replaceAll("[\"'\\u201c\\u201d\\u2018\\u2019]$", "");
 
         // Reverse lookup: find QQ(s) that own this game ID
         try {
