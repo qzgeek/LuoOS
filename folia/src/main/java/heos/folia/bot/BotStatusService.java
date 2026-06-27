@@ -18,11 +18,13 @@ public class BotStatusService {
     private final Logger logger;
     private final String displayName;
     private final String description;
+    private final String displayIp;
 
-    public BotStatusService(Logger logger, String host, int port, String displayName, String description) {
+    public BotStatusService(Logger logger, String host, int port, String displayName, String description, String displayIp) {
         this.logger = logger;
         this.displayName = displayName;
         this.description = description;
+        this.displayIp = displayIp;
     }
 
     record ServerStatus(boolean online, String version, int onlinePlayers, int maxPlayers,
@@ -106,8 +108,8 @@ public class BotStatusService {
             playerNames.add(p.getName());
         }
 
-        BufferedImage card = renderer.render(displayName, icon, server.getIp() + ":" + server.getPort(),
-                online, ver, description, description, 0, max, bottom, cpu, mem, background, playerNames);
+        BufferedImage card = renderer.render(displayName, icon, displayIp,
+                0, ver, description, description, online, max, bottom, cpu, mem, background, playerNames);
 
         try { return renderer.toPngBytes(card); }
         catch (Exception e) { logger.warning("Card render failed: " + e.getMessage()); return null; }

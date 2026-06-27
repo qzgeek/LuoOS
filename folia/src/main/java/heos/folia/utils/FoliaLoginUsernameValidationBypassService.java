@@ -136,45 +136,38 @@ public final class FoliaLoginUsernameValidationBypassService implements AutoClos
     // === Core logic: process a Hello packet. Returns true if handled (don't pass through). ===
 
     private boolean processHello(Channel ch, String username) {
-        // 1) Reject banned / not-whitelisted
+        // 1) Reject banned / not-whitelisted (stays at Netty level)
         if (rejectHeosLogin(ch, username)) return true;
 
-        // 2) Compute expected UUID
-        UUID rawUuid = offlineUuid(username);
-        UUID effectiveUuid = rawUuid;
-
-        // 3) Account binding: remap UUID + concurrency check
-        boolean enableBinding = plugin.getConfig().getBoolean("enableAccountBinding", true);
-        if (enableBinding) {
-            UUID targetUuid = accountBinding.resolveEffectiveUuid(rawUuid);
-            if (!targetUuid.equals(rawUuid)) {
-                String onlineName = accountBinding.checkGroupOnline(rawUuid);
-                if (onlineName != null) {
-                    disconnectLogin(ch, FoliaMessages.bindGroupOnline(onlineName));
-                    plugin.getLogger().info("Rejected bound player " + username + " — " + onlineName + " is online");
-                    return true;
-                }
-                effectiveUuid = targetUuid;
-                plugin.getLogger().info("Bound player " + username + " → target UUID " + effectiveUuid);
-            }
-        }
-
-        // 4) Offline bypass for non-standard usernames
+        // 2) For non-standard usernames (Chinese etc.), still need offline bypass
         boolean allowOffline = plugin.getConfig().getBoolean("allowOfflinePlayers", true);
         boolean isStandard = FoliaMojangApi.isValidMojangUsername(username);
 
         if (allowOffline && !isStandard) {
+            UUID effectiveUuid = resolveBindingUuid(username);
             acceptOfflineLogin(ch, username, effectiveUuid);
             return true;
         }
 
-        // 5) Bound account with standard name: force target UUID
-        if (enableBinding && !effectiveUuid.equals(rawUuid)) {
-            acceptOfflineLogin(ch, username, effectiveUuid);
-            return true;
-        }
+        // 3) Standard username — let vanilla process (triggers AsyncPlayerPreLoginEvent etc.)
+        //    Account binding UUID remapping happens in FoliaAuthListener
+        return false;
+    }
 
-        return false; // Not handled — let vanilla process
+    private UUID resolveBindingUuid(String username) {
+        UUID rawUuid = offlineUuid(username);
+        if (plugin.getConfig().getBoolean("enableAccountBinding", true)) {
+            UUID target = accountBinding.resolveEffectiveUuid(rawUuid);
+            if (!target.equals(rawUuid)) {
+                String onlineName = accountBinding.checkGroupOnline(rawUuid);
+                if (onlineName != null) {
+                    plugin.getLogger().info("Rejected bound player " + username + " — " + onlineName + " is online");
+                    return null; // caller should handle null
+                }
+                return target;
+            }
+        }
+        return rawUuid;
     }
 
     // === Rejection ===

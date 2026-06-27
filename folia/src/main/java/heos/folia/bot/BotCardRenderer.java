@@ -154,10 +154,32 @@ public class BotCardRenderer {
         drawText(g, String.format("%.1f%%", mem), cx, y, normalFont, memC);
         y += LINE_GAP;
 
-        // Player lines
-        for (String pl : playerLines) {
-            drawText(g, pl, textX, y, normalFont, theme.get("text_sub"));
-            y += LINE_GAP;
+        // Player names — horizontal, auto-wrap
+        if (!playerLines.isEmpty()) {
+            g.setFont(normalFont);
+            g.setColor(theme.get("text_sub"));
+            FontMetrics fm = g.getFontMetrics(normalFont);
+            int maxWidth = cw - textX - 80;
+            int px = textX;
+            int py = y;
+            StringBuilder line = new StringBuilder();
+            for (int i = 0; i < playerLines.size(); i++) {
+                String name = playerLines.get(i);
+                String sep = (i == playerLines.size() - 1) ? "" : "、";
+                String segment = name + sep;
+                int segW = fm.stringWidth(segment);
+                if (line.length() > 0 && px + segW > textX + maxWidth) {
+                    g.drawString(line.toString(), px, py + normalFont.getSize());
+                    line.setLength(0);
+                    px = textX;
+                    py += LINE_GAP;
+                }
+                line.append(segment);
+                px += segW;
+            }
+            if (line.length() > 0) {
+                g.drawString(line.toString(), textX, py + normalFont.getSize());
+            }
         }
 
         // Bottom bar

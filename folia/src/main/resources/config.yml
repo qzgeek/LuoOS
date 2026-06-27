@@ -50,6 +50,16 @@ minPasswordLength: 4
 # 注册密码允许的最长长度。
 maxPasswordLength: 32
 
+# IPs that bypass login/register (e.g. Lophine fake players / bots).
+# 无需登录/注册的 IP 列表，用于跳过假人认证。
+#loginBypassIps: []
+#  - "127.0.0.1"
+
+# Player names that bypass login/register (e.g. BOT_xxx).
+# 无需登录/注册的玩家名称列表。
+#loginBypassNames: []
+#  - "BOT_"
+
 # =============================================================================
 # Account Binding / 账号绑定
 # =============================================================================
@@ -82,10 +92,10 @@ bot:
   access_token: ""
   qq_groups: []
   max_per_qq: 3
-  allowed_id_chars: "a-zA-Z0-9_-"
+  allowed_id_chars: "a-zA-Z0-9_-."
   max_id_length: 16
   status_trigger: "服务器还活着吗"
-  rate_limit_max: 3
+  rate_limit_max: 5
   rate_limit_window: 60
   reply_delay_min_ms: 1000
   reply_delay_max_ms: 2000
@@ -93,6 +103,7 @@ bot:
   mc_port: 25565
   mc_display_name: "LuoOS服务器"
   mc_description: "欢迎来到LuoOS"
+  mc_display_ip: "127.0.0.1:25565"
 
 # =============================================================================
 # TPS Display / TPS 显示

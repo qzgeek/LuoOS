@@ -54,6 +54,27 @@ public final class FoliaAuthService {
         boolean premium = isPremiumUuid(player);
         String ip = FoliaPlayerAccess.ip(player);
 
+        // Bot/fake-player bypass — skip auth for whitelisted IPs/names
+        if (isLoginBypassed(player, ip)) {
+            premium = false; // treat as offline
+            FoliaPlayerData data = storage.load(uuid);
+            if (data == null) data = new FoliaPlayerData(player.getName(), uuid, false);
+            data.isOnlineAccount = false;
+            data.lastIp = ip;
+            data.lastLoginTime = System.currentTimeMillis();
+            nameResolver.resolve(data);
+            storage.save(data);
+            Session session = new Session(data, true);
+            session.ip = ip;
+            sessions.put(uuid, session);
+            updateLoginProtection(player, false);
+            tpsDisplayService.start(player);
+            applyDisplayName(player, data);
+            player.updateCommands();
+            plugin.getLogger().info("[Auth] Bot bypass: " + player.getName() + " (IP: " + ip + ")");
+            return;
+        }
+
         FoliaPlayerData data = storage.load(uuid);
         if (data == null) {
             // New player, create data
@@ -360,6 +381,21 @@ public final class FoliaAuthService {
             player.displayName(net.kyori.adventure.text.Component.text(data.displayName));
             player.playerListName(net.kyori.adventure.text.Component.text(data.displayName));
         }
+    }
+
+    private boolean isLoginBypassed(Player player, String ip) {
+        // Check IP whitelist
+        var ips = plugin.getConfig().getStringList("loginBypassIps");
+        for (String bip : ips) {
+            if (ip.equals(bip.trim())) return true;
+        }
+        // Check name whitelist (prefix match for BOT_ etc.)
+        var names = plugin.getConfig().getStringList("loginBypassNames");
+        String name = player.getName();
+        for (String bn : names) {
+            if (name.equals(bn.trim()) || name.startsWith(bn.trim())) return true;
+        }
+        return false;
     }
 
     private void decrementIp(String ip) {
