@@ -21,6 +21,8 @@ public class BotStatusService {
     private final String displayIp;
     private final java.io.File dataFolder;
     private final int bgMaskAlpha;
+    private final String mcHost;
+    private final int mcPort;
 
     public BotStatusService(Logger logger, String host, int port, String displayName, String description,
                             String displayIp, java.io.File dataFolder, int bgMaskAlpha) {
@@ -30,10 +32,13 @@ public class BotStatusService {
         this.displayIp = displayIp;
         this.dataFolder = dataFolder;
         this.bgMaskAlpha = bgMaskAlpha;
+        this.mcHost = host;
+        this.mcPort = port;
     }
 
     record ServerStatus(boolean online, String version, int onlinePlayers, int maxPlayers,
-                        String motd, List<String> playerNames, long latency, String error) {}
+                        String motd, List<String> playerNames, long latency, String error) {}  // unused fields kept for compat
+    record LocalPingResult(BufferedImage icon, String description) {}
 
     /** Get server status directly via Bukkit API — always online since we're in-process. */
     public ServerStatus ping() {
@@ -92,11 +97,11 @@ public class BotStatusService {
 
         BotCardRenderer renderer = new BotCardRenderer(1500, 700, bgMaskAlpha);
 
-        // Load server icon from server root directory
+        // Ping local server MOTD to get the icon (supports icons set by other plugins)
+        LocalPingResult pingResult = pingLocal();
         BufferedImage icon = null;
-        java.io.File serverIcon = new java.io.File(server.getWorldContainer(), "server-icon.png");
-        if (serverIcon.exists()) {
-            try { icon = ImageIO.read(serverIcon); } catch (Exception ignored) {}
+        if (pingResult != null && pingResult.icon != null) {
+            icon = pingResult.icon;
         }
         if (icon == null) {
             icon = new BufferedImage(64, 64, BufferedImage.TYPE_INT_RGB);
@@ -147,5 +152,73 @@ public class BotStatusService {
             logger.warning("Failed to load background: " + e.getMessage());
             return null;
         }
+    }
+
+    /** Connect to localhost MC server and extract icon from MOTD handshake. */
+    private LocalPingResult pingLocal() {
+        try (java.net.Socket socket = new java.net.Socket()) {
+            socket.connect(new java.net.InetSocketAddress(mcHost, mcPort), 3000);
+            java.io.OutputStream out = socket.getOutputStream();
+            java.io.DataInputStream in = new java.io.DataInputStream(socket.getInputStream());
+
+            // Send handshake + status request
+            java.io.ByteArrayOutputStream buf = new java.io.ByteArrayOutputStream();
+            java.io.DataOutputStream dos = new java.io.DataOutputStream(buf);
+            dos.writeByte(0x00); // packet ID
+            writeVarInt(dos, 767); // protocol version
+            writeVarInt(dos, mcHost.length());
+            dos.writeBytes(mcHost);
+            dos.writeShort(mcPort);
+            writeVarInt(dos, 1); // next state: status
+            writePacket(out, buf.toByteArray());
+
+            buf.reset();
+            writeVarInt(dos, 0x00); // status request
+            writePacket(out, buf.toByteArray());
+
+            // Read response
+            int len = readVarInt(in);
+            int packetId = readVarInt(in);
+            if (packetId != 0x00) return null;
+            int jsonLen = readVarInt(in);
+            byte[] jsonBytes = new byte[jsonLen];
+            in.readFully(jsonBytes);
+            String json = new String(jsonBytes, java.nio.charset.StandardCharsets.UTF_8);
+            com.google.gson.JsonObject root = com.google.gson.JsonParser.parseString(json).getAsJsonObject();
+
+            // Extract icon
+            BufferedImage icon = null;
+            if (root.has("favicon")) {
+                String favicon = root.get("favicon").getAsString();
+                if (favicon.startsWith("data:image/png;base64,")) {
+                    byte[] imgBytes = java.util.Base64.getDecoder().decode(favicon.substring(22));
+                    icon = ImageIO.read(new java.io.ByteArrayInputStream(imgBytes));
+                }
+            }
+            return new LocalPingResult(icon, "");
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    private static void writeVarInt(java.io.DataOutputStream dos, int value) throws java.io.IOException {
+        while ((value & 0xFFFFFF80) != 0) { dos.writeByte((value & 0x7F) | 0x80); value >>>= 7; }
+        dos.writeByte(value & 0x7F);
+    }
+
+    private static int readVarInt(java.io.DataInputStream in) throws java.io.IOException {
+        int value = 0, shift = 0;
+        byte b;
+        do { b = in.readByte(); value |= (b & 0x7F) << shift; shift += 7; } while ((b & 0x80) != 0);
+        return value;
+    }
+
+    private static void writePacket(java.io.OutputStream out, byte[] data) throws java.io.IOException {
+        java.io.ByteArrayOutputStream buf = new java.io.ByteArrayOutputStream();
+        java.io.DataOutputStream dos = new java.io.DataOutputStream(buf);
+        writeVarInt(dos, data.length);
+        dos.write(data);
+        out.write(buf.toByteArray());
+        out.flush();
     }
 }
