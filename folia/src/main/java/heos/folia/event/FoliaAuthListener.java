@@ -63,14 +63,14 @@ public final class FoliaAuthListener implements Listener {
             return;
         }
 
-        // Whitelist check — by UUID first, then by name, also check DB (QQ bot whitelist)
-        if (plugin.getConfig().getBoolean("enableWhitelist", false)) {
-            if (!whitelistData.isWhitelisted(uuid) && !whitelistData.isWhitelisted(username)
-                    && !isInDbWhitelist(username)) {
-                event.disallow(AsyncPlayerPreLoginEvent.Result.KICK_WHITELIST, kickComponent(FoliaMessages.whitelistKick()));
-                plugin.getLogger().info(FoliaMessages.whitelistDeniedLog(username));
-                return;
-            }
+        // Whitelist check — JSON whitelist (enableWhitelist) + DB whitelist (QQ bot, always active)
+        // DB whitelist only blocks if it has entries (i.e., QQ bot is actively managing it)
+        boolean inJson = !plugin.getConfig().getBoolean("enableWhitelist", false)
+                || whitelistData.isWhitelisted(uuid) || whitelistData.isWhitelisted(username);
+        if (!inJson && !isInDbWhitelist(username) && dbWhitelistHasEntries()) {
+            event.disallow(AsyncPlayerPreLoginEvent.Result.KICK_WHITELIST, kickComponent(FoliaMessages.whitelistKick()));
+            plugin.getLogger().info(FoliaMessages.whitelistDeniedLog(username));
+            return;
         }
 
         // Ban check — by UUID, also check DB (QQ bot blacklist)
@@ -245,6 +245,18 @@ public final class FoliaAuthListener implements Listener {
     void onDamage(EntityDamageByEntityEvent event) {
         if (event.getDamager() instanceof Player player && authService.shouldBlock(player)) {
             event.setCancelled(true);
+        }
+    }
+
+    /** Check if the QQ bot whitelist table has any entries (to decide if enforcement is active). */
+    private boolean dbWhitelistHasEntries() {
+        try {
+            var conn = storage.getConnection();
+            var ps = conn.prepareStatement("SELECT COUNT(*) FROM qq_whitelist");
+            var rs = ps.executeQuery();
+            return rs.next() && rs.getInt(1) > 0;
+        } catch (Exception e) {
+            return false;
         }
     }
 
