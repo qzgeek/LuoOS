@@ -63,13 +63,26 @@ public final class FoliaAuthListener implements Listener {
             return;
         }
 
-        // Whitelist check — JSON whitelist (enableWhitelist) + DB whitelist (QQ bot, always active)
-        // DB whitelist only blocks if it has entries (i.e., QQ bot is actively managing it)
-        boolean inJson = !plugin.getConfig().getBoolean("enableWhitelist", false)
-                || whitelistData.isWhitelisted(uuid) || whitelistData.isWhitelisted(username);
-        if (!inJson && !isInDbWhitelist(username) && dbWhitelistHasEntries()) {
+        // Whitelist check — always check DB (QQ bot whitelist), optional JSON whitelist
+        boolean enableWl = plugin.getConfig().getBoolean("enableWhitelist", false);
+        boolean inJsonWl = !enableWl || whitelistData.isWhitelisted(uuid) || whitelistData.isWhitelisted(username);
+        boolean inDbWl = isInDbWhitelist(username);
+        boolean dbHasEntries = dbWhitelistHasEntries();
+
+        plugin.getLogger().info("[Whitelist] enableWl=" + enableWl + " inJson=" + inJsonWl
+                + " inDb=" + inDbWl + " dbHasEntries=" + dbHasEntries + " for " + username);
+
+        // If DB has entries, only allow those in the DB whitelist
+        // If DB is empty, fall back to JSON whitelist (if enabled)
+        if (dbHasEntries) {
+            if (!inDbWl && !inJsonWl) {
+                plugin.getLogger().info("[Whitelist] Denied (not in DB): " + username);
+                event.disallow(AsyncPlayerPreLoginEvent.Result.KICK_WHITELIST, kickComponent(FoliaMessages.whitelistKick()));
+                return;
+            }
+        } else if (enableWl && !inJsonWl) {
+            plugin.getLogger().info("[Whitelist] Denied (not in JSON): " + username);
             event.disallow(AsyncPlayerPreLoginEvent.Result.KICK_WHITELIST, kickComponent(FoliaMessages.whitelistKick()));
-            plugin.getLogger().info(FoliaMessages.whitelistDeniedLog(username));
             return;
         }
 
