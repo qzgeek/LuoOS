@@ -116,16 +116,28 @@ public final class FoliaBindCommands implements CommandExecutor, TabCompleter {
     }
 
     private void revoke(CommandSender sender, String[] args) {
-        if (!sender.hasPermission("luoos.admin")) { sender.sendMessage(ChatColor.RED + "Permission denied."); return; }
+        if (!(sender instanceof Player player)) { sender.sendMessage("Only players."); return; }
         if (args.length < 2) { sender.sendMessage(ChatColor.RED + FoliaMessages.bindUsageRevoke()); return; }
         try {
             String idStr = args[1].startsWith("#") ? args[1].substring(1) : args[1];
             long id = Long.parseLong(idStr);
+            FoliaStorage.BindingEntry entry = storage.getBindingById(id);
+            if (entry == null) {
+                sender.sendMessage(ChatColor.RED + "绑定不存在。");
+                return;
+            }
+            // Only the two involved players or admins can revoke
+            boolean isAdmin = sender.hasPermission("luoos.admin");
+            if (!isAdmin && !entry.boundUuid.equals(player.getUniqueId())
+                    && (entry.targetUuid == null || !entry.targetUuid.equals(player.getUniqueId()))) {
+                sender.sendMessage(ChatColor.RED + "你无法撤销他人的绑定。");
+                return;
+            }
             sender.sendMessage(storage.revokeBinding(id)
                     ? ChatColor.GREEN + FoliaMessages.bindRevoked(id)
-                    : ChatColor.RED + "Binding not found.");
+                    : ChatColor.RED + "撤销失败。");
         } catch (NumberFormatException e) {
-            sender.sendMessage(ChatColor.RED + "Invalid binding ID. Use /heos bind list to see IDs.");
+            sender.sendMessage(ChatColor.RED + "Invalid binding ID.");
         }
     }
 

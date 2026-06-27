@@ -462,7 +462,7 @@ public final class FoliaStorage {
         return list;
     }
 
-    private BindingEntry getBindingById(long id) {
+    public BindingEntry getBindingById(long id) {
         try (PreparedStatement ps = connection.prepareStatement(
                 "SELECT id, target_uuid, target_name, bound_uuid, bound_name, status, created_at, accepted_at FROM "
                         + BIND_TABLE + " WHERE id = ?")) {

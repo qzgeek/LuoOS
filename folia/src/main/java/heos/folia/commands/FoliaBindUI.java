@@ -149,6 +149,14 @@ public final class FoliaBindUI implements Listener {
 
     public void showChestGui(Player player) {
         List<FoliaStorage.BindingEntry> bindings = storage.listAllBindings();
+        boolean isAdmin = player.hasPermission("luoos.admin");
+        // Non-admins: only see own bindings
+        if (!isAdmin) {
+            bindings = bindings.stream()
+                    .filter(e -> e.boundUuid.equals(player.getUniqueId())
+                            || (e.targetUuid != null && e.targetUuid.equals(player.getUniqueId())))
+                    .toList();
+        }
         int page = guiPages.getOrDefault(player.getUniqueId(), 0);
         showChestGuiPage(player, bindings, page);
     }
@@ -246,10 +254,18 @@ public final class FoliaBindUI implements Listener {
             if (parts.length > 0 && parts[0].startsWith("#")) {
                 try {
                     long id = Long.parseLong(parts[0].substring(1));
-                    if (storage.revokeBinding(id)) {
+                    // Verify ownership: only involved players or admins can revoke
+                    boolean isAdmin = player.hasPermission("luoos.admin");
+                    FoliaStorage.BindingEntry entry = storage.getBindingById(id);
+                    if (entry == null) {
+                        player.sendMessage(ChatColor.RED + "绑定不存在。");
+                    } else if (!isAdmin && !entry.boundUuid.equals(player.getUniqueId())
+                            && (entry.targetUuid == null || !entry.targetUuid.equals(player.getUniqueId()))) {
+                        player.sendMessage(ChatColor.RED + "你无法撤销他人的绑定。");
+                    } else if (storage.revokeBinding(id)) {
                         player.sendMessage(ChatColor.GREEN + FoliaMessages.bindRevoked(id));
                     } else {
-                        player.sendMessage(ChatColor.RED + "绑定 #" + id + " 不存在。");
+                        player.sendMessage(ChatColor.RED + "撤销失败。");
                     }
                     // Refresh GUI
                     showChestGuiPage(player, storage.listAllBindings(),
