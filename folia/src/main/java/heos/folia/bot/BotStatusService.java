@@ -92,11 +92,19 @@ public class BotStatusService {
 
         BotCardRenderer renderer = new BotCardRenderer(1500, 700, bgMaskAlpha);
 
-        BufferedImage icon = new BufferedImage(64, 64, BufferedImage.TYPE_INT_RGB);
-        Graphics2D ig = icon.createGraphics();
-        ig.setColor(Color.decode("#2C3E50")); ig.fillRect(0, 0, 64, 64);
-        ig.setColor(Color.decode("#5D6D7E")); ig.fillOval(4, 4, 56, 56);
-        ig.dispose();
+        // Load server icon from server root directory
+        BufferedImage icon = null;
+        java.io.File serverIcon = new java.io.File(server.getWorldContainer(), "server-icon.png");
+        if (serverIcon.exists()) {
+            try { icon = ImageIO.read(serverIcon); } catch (Exception ignored) {}
+        }
+        if (icon == null) {
+            icon = new BufferedImage(64, 64, BufferedImage.TYPE_INT_RGB);
+            Graphics2D ig = icon.createGraphics();
+            ig.setColor(Color.decode("#2C3E50")); ig.fillRect(0, 0, 64, 64);
+            ig.setColor(Color.decode("#5D6D7E")); ig.fillOval(4, 4, 56, 56);
+            ig.dispose();
+        }
 
         java.util.List<String> bottom = java.util.List.of(
                 "查询时间：" + java.time.LocalDateTime.now().toString().replace("T", " ").substring(0, 19),
