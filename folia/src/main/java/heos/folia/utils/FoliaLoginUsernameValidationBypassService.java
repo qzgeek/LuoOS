@@ -225,11 +225,36 @@ public final class FoliaLoginUsernameValidationBypassService implements AutoClos
             disconnectLogin(ch, FoliaMessages.banMessage(ban.reason, FoliaTimeParser.formatAbsolute(ban.expiryTime)));
             return true;
         }
+        // Check DB blacklist (QQ bot bans) — player bound to a blacklisted QQ
+        String dbBanReason = dbBlacklistReason(username);
+        if (dbBanReason != null) {
+            disconnectLogin(ch, "你已被封禁" + (dbBanReason.isEmpty() ? "" : "：" + dbBanReason));
+            return true;
+        }
         if (!plugin.getConfig().getBoolean("enableCustomBan", true)) return false;
         FoliaBanData.IpBanEntry ip = banData.getIpBan(channelIp(ch));
         if (ip == null) return false;
         disconnectLogin(ch, FoliaMessages.banIpMessage(ip.reason, FoliaTimeParser.formatAbsolute(ip.expiryTime)));
         return true;
+    }
+
+    /** Returns ban reason if this player is bound to a blacklisted QQ, null otherwise. */
+    private String dbBlacklistReason(String username) {
+        try {
+            var conn = storage.getConnection();
+            PreparedStatement ps = conn.prepareStatement(
+                    "SELECT b.reason, b.expiry FROM qq_blacklist b " +
+                    "INNER JOIN qq_whitelist w ON b.qq = w.qq " +
+                    "WHERE LOWER(w.player_name) = ? AND (b.expiry = 0 OR b.expiry > ?)");
+            ps.setString(1, username.toLowerCase());
+            ps.setLong(2, System.currentTimeMillis());
+            ResultSet rs = ps.executeQuery();
+            if (rs.next()) {
+                String reason = rs.getString("reason");
+                return reason != null && !reason.isEmpty() ? reason : "";
+            }
+        } catch (Exception e) {}
+        return null;
     }
 
     // === Offline login ===
