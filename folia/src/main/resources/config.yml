@@ -1,199 +1,275 @@
-# LuoOS Folia Configuration / LuoOS Folia 配置
-# https://github.com/qzgeek/heos-public (forked from chara2015/heos-public)
+# =============================================================================
+#   LuoOS 插件配置文件
+#   项目地址: https://github.com/qzgeek/heos-public
+#   作者: chara201x, qzgeek (黔中极客)
+# =============================================================================
 
 # =============================================================================
-# Authentication / 登录认证
+# 登录认证系统
 # =============================================================================
 
-# Whether to enable login/register authentication.
-# When disabled, players do not need /login or /register.
-# 是否启用登录/注册认证。关闭后玩家无需使用 /login 或 /register。
+# 是否启用登录/注册认证。关闭后所有玩家无需密码即可进入游戏。
+# 警告：关闭后离线玩家账号可被同名冒充，强烈建议保持开启。
+# 合法值: true（开启） / false（关闭）
 enableAuthentication: true
 
-# Language file code, e.g. zh_cn or en_us.
-# 语言文件代码，例如 zh_cn 或 en_us。
+# 语言文件。插件消息和提示将使用对应语言。
+# 目前支持: zh_cn（简体中文） / en_us（English）
 language: zh_cn
 
-# Allow offline (non-premium) players to join an online-mode server.
-# When enabled, offline players bypass Mojang validation.
-# 在线模式服务器中是否允许非正版玩家进入。启用后离线玩家将绕过 Mojang 验证。
+# 是否允许离线（非正版）玩家进入在线模式服务器。
+# 开启后，非标准纯英文名的玩家将绕过 Mojang 正版验证。
+# 合法值: true（允许） / false（仅正版）
 allowOfflinePlayers: true
 
-# Allow offline usernames with extended character sets (Chinese, combining marks, etc.)
-# When false, only [a-zA-Z0-9_+-.] are allowed.
-# 允许离线玩家名称使用更多字符（中文、组合标记等）。关闭后仅允许 [a-zA-Z0-9_+-.]。
+# 是否允许离线玩家名称使用扩展字符（中文、特殊符号等）。
+# 关闭后仅允许 [a-zA-Z0-9_+-.] 字符的用户名。
+# 合法值: true（允许） / false（仅ASCII字符）
 allowMoreOfflineUsernameCharacters: true
 
-# Separate online/premium and offline account data.
-# When enabled, the same username can have both a premium and an offline data entry.
-# They are distinguished by UUID.
-# 是否分离同名正版账号和离线账号的登录数据。启用后同名正版和离线账号数据独立，按 UUID 区分。
+# 是否区分同名正版和离线玩家的登录数据。
+# 开启后，同名正版和离线玩家拥有独立的账号数据（按UUID区分）。
+# 合法值: true（分离存储） / false（合并存储）
 separateOnlineOfflineAccounts: true
 
-# Intercept unprefixed login/register/changepassword commands.
 # 是否拦截无命名空间前缀的 login/register/changepassword 等命令。
+# 开启后，玩家直接输入 /login 等命令会被拦截，需使用 /los login。
+# 合法值: true（拦截） / false（不拦截）
 enableUnprefixedCommandHijack: true
 
-# Time limit (seconds) for a player to login/register after joining.
-# 玩家进入服务器后必须完成登录/注册的时间限制，单位为秒。
+# 玩家进入服务器后必须在多少秒内完成登录/注册，超时将被踢出。
+# 合法值: 1 - 3600（秒）
 loginTimeout: 60
 
-# Reminder interval (seconds) to remind unauthenticated players.
-# 未登录玩家收到登录/注册提醒的间隔，单位为秒。
+# 未登录玩家每隔多少秒收到一次登录/注册提醒。
+# 合法值: 1 - 600（秒）
 loginReminderSeconds: 10
 
-# Minimum password length for registration.
 # 注册密码允许的最短长度。
+# 合法值: 1 - 64
 minPasswordLength: 4
 
-# Maximum password length for registration.
 # 注册密码允许的最长长度。
+# 合法值: 4 - 256
 maxPasswordLength: 32
 
-# IPs that bypass login/register (e.g. Lophine fake players / bots).
-# 无需登录/注册的 IP 列表，用于跳过假人认证。
+# 以下为登录绕过配置。符合规则的玩家无需登录即可进入游戏。
+# 格式：每行一个IP地址（前面加两个空格和短横线）
 #loginBypassIps: []
 #  - "127.0.0.1"
+#  - "192.168.1.100"
 
-# Player names that bypass login/register (e.g. BOT_xxx).
-# 无需登录/注册的玩家名称列表。
+# 无需登录的玩家名称列表。前缀匹配（如"BOT_"可匹配所有假人）。
+# 格式：每行一个名称或前缀（前面加两个空格和短横线）
 #loginBypassNames: []
 #  - "BOT_"
+#  - "假人_"
 
 # =============================================================================
-# Account Binding / 账号绑定
+# 账号绑定系统
 # =============================================================================
 
-# Whether to enable the account binding system (/los bind ...).
-# 是否启用账号绑定系统（/los bind ...）。
+# 是否启用账号绑定功能（/los bind）。
+# 允许多个小号绑定到一个主账号，共享主账号的游戏数据。
+# 合法值: true（启用） / false（禁用）
 enableAccountBinding: true
 
-# Storage backend for binding data: "sqlite" (default) or "mysql".
-# 绑定数据存储后端："sqlite"（默认）或 "mysql"。
+# 绑定数据存储方式。
+# sqlite：本地单文件数据库，无需额外配置
+# mysql：需要配置下方的MySQL连接信息
+# 合法值: sqlite / mysql
 bindingStorage: sqlite
 
-# MySQL connection (only used when bindingStorage is "mysql").
-# MySQL 连接（仅 bindingStorage 为 "mysql" 时使用）。
+# MySQL 连接配置（仅 bindingStorage 设为 mysql 时需要）。
+# 格式：
+#   url: jdbc:mysql://主机地址:端口/数据库名
+#   user: 数据库用户名
+#   password: 数据库密码
 #mysql:
 #  url: jdbc:mysql://localhost:3306/luoos
 #  user: luoos
-#  password: changeme
+#  password: 请修改此密码
 
 # =============================================================================
-# OneBot QQ Bot / QQ机器人
+# QQ机器人（OneBot协议）
 # =============================================================================
 
-# Enable the embedded OneBot WebSocket server for QQ group integration.
-# 是否启用内嵌的 OneBot WebSocket 服务器用于QQ群集成。
+# 插件内嵌了 OneBot WebSocket 服务器，用于对接 QQ 机器人框架。
+# 目前支持的QQ框架：NapCat、LLOneBot 等。
 bot:
+  # 是否启用QQ机器人模块。
+  # 合法值: true（启用） / false（禁用）
   enabled: false
+
+  # WebSocket 服务器监听地址和端口。
+  # host: 监听地址，0.0.0.0 表示所有网络接口
+  # port: 监听端口，需与QQ框架配置中的反向WebSocket地址一致
   host: 0.0.0.0
   port: 10100
+
+  # 鉴权令牌。需与QQ框架配置中的 access_token 完全一致。
+  # 留空则不验证令牌（不推荐）。
   access_token: ""
-  qq_groups: []
+
+  # 允许响应命令的QQ群聊列表。
+  # 格式：[群号1, 群号2, ...]
+  # 设为空数组 [] 表示允许所有群聊（调试用，不推荐生产环境使用）。
+  qq_groups: [1054140738]
+
+  # 每个QQ号最多可申请的白名单数量。
+  # 合法值: 1 - 99
   max_per_qq: 3
+
+  # 允许的玩家ID字符集（正则表达式）。
+  # 用于白名单申请时校验玩家ID。
   allowed_id_chars: "a-zA-Z0-9_-."
+
+  # 玩家ID允许的最大长度。
+  # 合法值: 3 - 32
   max_id_length: 16
+
+  # 触发服务器状态卡片的命令词。
+  # 玩家在群内发送此文字时，机器人返回状态卡片图片。
   status_trigger: "服务器还活着吗"
+
+  # 群聊命令频率限制。
+  # rate_limit_max：每个时间窗口内允许的最大命令数
+  # rate_limit_window：时间窗口长度（秒）
+  # 管理员不受频率限制。
   rate_limit_max: 5
   rate_limit_window: 60
+
+  # 机器人回复延迟范围（毫秒）。
+  # 在范围内随机延迟后再回复，模拟真人打字。
+  # reply_delay_min_ms：最小延迟
+  # reply_delay_max_ms：最大延迟
   reply_delay_min_ms: 1000
   reply_delay_max_ms: 2000
+
+  # 是否开启调试日志。
+  # 开启后会在控制台输出 WebSocket 收发内容和命令处理详情。
+  # 合法值: true（开启） / false（关闭）
   debug_log: false
-  mc_host: 127.0.0.1
-  mc_port: 25565
+
+  # 状态卡片中显示的服务器名称。
   mc_display_name: "LuoOS服务器"
+
+  # 状态卡片中显示的服务器简介。
   mc_description: "欢迎来到LuoOS"
+
+  # 状态卡片中显示的连接地址。
   mc_display_ip: "127.0.0.1:25565"
+
+  # 状态卡片背景遮罩透明度（0-255）。
+  # 数值越低背景越透明，越高越暗。
   motd_bg_mask_alpha: 140
 
 # =============================================================================
-# TPS Display / TPS 显示
+# TPS 显示
 # =============================================================================
 
-# Whether to show TPS in the player list footer.
-# 是否在玩家列表页脚显示服务器 TPS 信息。
+# 是否在玩家列表底部显示服务器 TPS（每秒ticks）信息。
+# 合法值: true（显示） / false（不显示）
 enableAutoLogTps: true
 
-# TPS refresh interval in ticks (20 ticks = 1 second).
-# TPS 信息刷新间隔，单位为 tick。20 tick 约等于 1 秒。
+# TPS 信息刷新间隔，单位为 tick。
+# 20 tick 约等于 1 秒。
+# 合法值: 10 - 1200
 autoLogTpsDelayTicks: 20
 
 # =============================================================================
-# Recipe Viewer Sync / 配方查看器同步
+# 配方查看器同步
 # =============================================================================
 
-# Sync server recipe data to client recipe viewers (JEI/REI).
-# Only works on Minecraft 1.21.2+.
-# 同步服务端配方数据给 JEI/REI 等客户端配方查看器。仅 1.21.2+ 生效。
+# 是否将服务器配方数据同步给 JEI/REI 等客户端配方查看器。
+# 仅 Minecraft 1.21.2 及以上版本生效。
+# 合法值: true（启用） / false（禁用）
 enableRecipeViewerSync: true
 
 # =============================================================================
-# Whitelist / 白名单
+# 白名单和封禁系统
 # =============================================================================
 
-# Whether to enable the LuoOS built-in whitelist.
-# 是否启用 LuoOS 自带白名单检查。
+# 是否启用 LuoOS 自带的白名单检查功能。
+# 与QQ机器人的白名单（qq_whitelist表）配合使用。
+# 合法值: true（启用） / false（禁用）
 enableWhitelist: false
 
-# =============================================================================
-# Ban System / 封禁系统
-# =============================================================================
-
-# Whether to enable the LuoOS custom ban system.
-# 是否启用 LuoOS 自带封禁系统和封禁命令。
+# 是否启用 LuoOS 自带的封禁系统（/ban、/unban 等命令）。
+# 合法值: true（启用） / false（禁用）
 enableCustomBan: true
 
 # =============================================================================
-# Player Data Migration / 玩家数据迁移
+# 玩家数据迁移工具
 # =============================================================================
 
-# Whether to enable player data migration.
-# Only enable when you need to migrate player data.
-# 是否启用离线/正版玩家数据迁移功能。只在需要迁移玩家数据时开启。
+# 是否启用玩家数据迁移功能。
+# 用于正版账户↔离线账户之间的数据转移。
+# 仅在需要迁移时临时开启，迁移完成后建议关闭。
+# 合法值: true（启用） / false（禁用）
 enablePlayerDataMigration: false
 
-# Temporary ban duration (seconds) for players during data migration.
-# 数据迁移期间临时阻止相关玩家登录的时间，单位为秒。
+# 数据迁移期间，相关玩家被临时禁入的时间（秒）。
+# 防止迁移过程中玩家登录导致数据错乱。
+# 合法值: 10 - 3600
 migrationBanSeconds: 30
 
 # =============================================================================
-# Session Limits / 会话限制
+# 会话与安全限制
 # =============================================================================
 
-# Maximum concurrent sessions from the same IP. -1 = no limit.
-# 同一个 IP 最多允许同时在线的玩家数量。-1 表示不限制。
+# 同一IP地址最多允许同时在线的人数。
+# -1 表示不限制。
+# 合法值: -1 或任意正整数
 maxConcurrentSessionsPerIp: -1
 
-# Kick message when the session limit is exceeded.
-# This is a custom admin message, it does NOT auto-follow language files.
-# 同 IP 在线数量超过限制时踢出玩家显示的消息。管理员可自定义，不会自动跟随语言文件。
-sessionLimitKickMessage: The online session limit for this IP has been reached
+# 同一IP在线人数超限时的踢出提示。
+sessionLimitKickMessage: "该IP的在线会话数已达上限"
 
-# =============================================================================
-# Login Failure Protection / 登录失败保护
-# =============================================================================
-
-# Temporarily lock a username after too many failed login attempts.
-# 是否在同一用户名连续登录失败过多时临时锁定该用户名。
-enableUsernameLoginFailureLock: true
-
-# Number of failed attempts before locking the username.
-# 触发用户名临时锁定前允许的连续失败次数。
+# 同一用户名连续登录失败多少次后临时锁定。
+# 防止暴力破解密码。
+# 合法值: 3 - 100
 usernameLoginFailureLimit: 5
 
-# Lock duration (seconds) for the username.
-# 用户名触发失败锁定后的持续时间，单位为秒。
+# 用户名被失败锁定后多少秒自动解锁。
+# 合法值: 10 - 3600
 usernameLoginFailureLockSeconds: 30
 
-# Temporarily lock an IP after too many failed login attempts.
-# 是否在同一 IP 连续登录失败过多时临时锁定该 IP。
-enableIpLoginFailureLock: false
+# =============================================================================
+# 服务器维护模式
+# =============================================================================
 
-# Number of failed attempts before locking the IP.
-# 触发 IP 临时锁定前允许的连续失败次数。
-ipLoginFailureLimit: 10
+# 是否启用维护模式。
+# 开启后只有管理员（OP）可以进入服务器，普通玩家会被拒绝。
+# 使用 /los maintenance on|off|status 命令控制。
+# 该设置在重启后依然有效。
+# 合法值: true（维护中） / false（正常）
+maintenance: false
 
-# Lock duration (seconds) for the IP.
-# IP 触发失败锁定后的持续时间，单位为秒。
-ipLoginFailureLockSeconds: 30
+# =============================================================================
+# 资源世界
+# =============================================================================
+
+# 资源世界是一个定期自动刷新的可采集资源的独立世界。
+# 每隔指定时间，旧的资源世界会被删除，以随机种子生成全新世界。
+# 刷新前后会全服广播提醒，玩家可使用 /los resource 传送进入。
+# 依赖 Worlds 插件 (v4.2.2+)，需要安装后才能使用。
+resourceWorld:
+  # 是否启用资源世界功能。
+  # 合法值: true（启用） / false（禁用）
+  enabled: false
+
+  # 资源世界自动刷新间隔，单位为分钟。
+  # 设为 0 表示禁用自动刷新（只能手动通过命令刷新）。
+  # 推荐值: 720（12小时）或 1440（24小时）
+  refreshIntervalMinutes: 720
+
+  # 是否同时创建资源世界的下界维度。
+  # 下界和主世界使用相同种子生成。
+  # 合法值: true（创建） / false（不创建）
+  nether: true
+
+  # 是否同时创建资源世界的末地维度。
+  # 末地和主世界使用相同种子生成。
+  # 合法值: true（创建） / false（不创建）
+  end: true

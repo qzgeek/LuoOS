@@ -88,7 +88,7 @@ public class BotStatusService {
     public byte[] renderLocal() {
         Runtime rt = Runtime.getRuntime();
         double mem = (rt.totalMemory() - rt.freeMemory()) * 100.0 / rt.maxMemory();
-        double cpu = -1;
+        double cpu = getCpuUsage();
 
         org.bukkit.Server server = org.bukkit.Bukkit.getServer();
         String ver = server.getMinecraftVersion();
@@ -134,6 +134,38 @@ public class BotStatusService {
 
         try { return renderer.toPngBytes(card); }
         catch (Exception e) { logger.warning("Card render failed: " + e.getMessage()); return null; }
+    }
+
+    /** Render a test card with fake player names for layout verification. */
+    public byte[] renderTestCard(List<String> fakeNames) {
+        Runtime rt = Runtime.getRuntime();
+        double mem = (rt.totalMemory() - rt.freeMemory()) * 100.0 / rt.maxMemory();
+        double cpu = getCpuUsage();
+        org.bukkit.Server server = org.bukkit.Bukkit.getServer();
+
+        BotCardRenderer renderer = new BotCardRenderer(1500, 700, bgMaskAlpha);
+        BufferedImage icon = new BufferedImage(64, 64, BufferedImage.TYPE_INT_RGB);
+        Graphics2D ig = icon.createGraphics();
+        ig.setColor(Color.decode("#2C3E50")); ig.fillRect(0, 0, 64, 64);
+        ig.setColor(Color.decode("#5D6D7E")); ig.fillOval(4, 4, 56, 56);
+        ig.dispose();
+
+        List<String> bottom = List.of(
+                "查询时间：" + java.time.LocalDateTime.now().toString().replace("T", " ").substring(0, 19),
+                "Write by 黔中极客 / LuoOS - 测试卡片");
+        BufferedImage background = loadBackground();
+        if (background == null) {
+            try (InputStream is = getClass().getClassLoader().getResourceAsStream("background.png")) {
+                if (is != null) background = ImageIO.read(is);
+            } catch (Exception ignored) {}
+        }
+
+        BufferedImage card = renderer.render(displayName, icon, displayIp,
+                0, server.getMinecraftVersion(), description, "玩家名换行渲染测试",
+                fakeNames.size(), server.getMaxPlayers(), bottom,
+                cpu, mem, background, fakeNames);
+        try { return renderer.toPngBytes(card); }
+        catch (Exception e) { logger.warning("Test card render failed: " + e.getMessage()); return null; }
     }
 
     /** Load first image from plugins/luoos/img/ directory, auto-create if missing. */
@@ -199,6 +231,18 @@ public class BotStatusService {
         } catch (Exception e) {
             return null;
         }
+    }
+
+    /** Get process CPU usage via OperatingSystemMXBean. Returns 0.0-100.0. */
+    private static double getCpuUsage() {
+        try {
+            java.lang.management.OperatingSystemMXBean osBean =
+                    java.lang.management.ManagementFactory.getOperatingSystemMXBean();
+            if (osBean instanceof com.sun.management.OperatingSystemMXBean sunBean) {
+                return sunBean.getProcessCpuLoad() * 100.0;
+            }
+        } catch (Exception ignored) {}
+        return -1.0;
     }
 
     private static void writeVarInt(java.io.DataOutputStream dos, int value) throws java.io.IOException {

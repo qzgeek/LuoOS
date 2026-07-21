@@ -47,6 +47,7 @@ subprojects {
     repositories {
         mavenCentral()
         maven("https://repo.papermc.io/repository/maven-public/")
+        maven("https://repo.extendedclip.com/content/repositories/placeholderapi/")
     }
 
     dependencies {
@@ -60,6 +61,7 @@ subprojects {
         "implementation"("org.xerial:sqlite-jdbc:3.49.1.0")
         "implementation"("at.favre.lib:bcrypt:0.10.2")
         "implementation"("org.java-websocket:Java-WebSocket:1.5.7")
+        "compileOnly"("me.clip:placeholderapi:2.11.6")
     }
 
     val isMinecraft26Plus = project.name.substringBefore('.').toIntOrNull()?.let { it >= 26 } == true

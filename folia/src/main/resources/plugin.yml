@@ -3,6 +3,7 @@ version: ${version}
 main: heos.folia.HeosFoliaPlugin
 api-version: '${api_version}'
 folia-supported: true
+softdepend: [Worlds]
 author: ${mod_author}
 website: ${mod_homepage}
 description: ${mod_description}

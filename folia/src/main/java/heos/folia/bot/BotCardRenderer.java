@@ -25,6 +25,7 @@ public class BotCardRenderer {
     private Font titleFont, normalFont, motdFont, bottomFont;
     private static final int ICON_W = 190, ICON_H = 190, ICON_R = 24;
     private static final int LINE_GAP = 52, BAR_H = 75, BASE_LINES = 7;
+    private static final int MAX_PLAYER_LINES = 5;  // max lines for player names before truncation
 
     // MC color codes
     private static final Map<Character, Color> MC_COLORS = Map.ofEntries(
@@ -123,25 +124,28 @@ public class BotCardRenderer {
         // Text area — calculate actual player name lines first for correct centering
         int textX = iconX + ICON_W + 45;
         int playerNameLines = 0;
+        boolean truncated = false;
         if (!playerLines.isEmpty()) {
             FontMetrics fm = g.getFontMetrics(normalFont);
             int maxWidth = cw - textX - 80;
             int lineWidth = 0;
             StringBuilder simLine = new StringBuilder();
             for (int i = 0; i < playerLines.size(); i++) {
+                if (playerNameLines >= MAX_PLAYER_LINES) { truncated = true; break; }
                 String name = playerLines.get(i);
                 String sep = (i == playerLines.size() - 1) ? "" : "、";
                 String segment = name + sep;
                 int segW = fm.stringWidth(segment);
                 if (simLine.length() > 0 && lineWidth + segW > maxWidth) {
                     playerNameLines++;
+                    if (playerNameLines >= MAX_PLAYER_LINES) { truncated = true; break; }
                     simLine.setLength(0);
                     lineWidth = 0;
                 }
                 simLine.append(segment);
                 lineWidth += segW;
             }
-            if (simLine.length() > 0) playerNameLines++;
+            if (!truncated && simLine.length() > 0) playerNameLines++;
         }
 
         int totalLines = BASE_LINES + playerNameLines;
@@ -181,7 +185,7 @@ public class BotCardRenderer {
         drawText(g, String.format("%.1f%%", mem), cx, y, normalFont, memC);
         y += LINE_GAP;
 
-        // Player names — horizontal, auto-wrap
+        // Player names — horizontal, auto-wrap, capped at MAX_PLAYER_LINES
         if (!playerLines.isEmpty()) {
             g.setFont(normalFont);
             g.setColor(theme.get("text_sub"));
@@ -189,23 +193,29 @@ public class BotCardRenderer {
             int maxWidth = cw - textX - 80;
             int px = textX;
             int py = y;
+            int lineCount = 0;
             StringBuilder line = new StringBuilder();
+            boolean showEllipsis = false;
             for (int i = 0; i < playerLines.size(); i++) {
+                if (lineCount >= MAX_PLAYER_LINES) { showEllipsis = true; break; }
                 String name = playerLines.get(i);
                 String sep = (i == playerLines.size() - 1) ? "" : "、";
                 String segment = name + sep;
                 int segW = fm.stringWidth(segment);
                 if (line.length() > 0 && px + segW > textX + maxWidth) {
-                    g.drawString(line.toString(), px, py + normalFont.getSize());
+                    if (lineCount == MAX_PLAYER_LINES - 1) { showEllipsis = true; break; }
+                    g.drawString(line.toString(), textX, py + normalFont.getSize());
                     line.setLength(0);
                     px = textX;
                     py += LINE_GAP;
+                    lineCount++;
                 }
                 line.append(segment);
                 px += segW;
             }
-            if (line.length() > 0) {
-                g.drawString(line.toString(), textX, py + normalFont.getSize());
+            if (line.length() > 0 && lineCount < MAX_PLAYER_LINES) {
+                String txt = showEllipsis ? line + "..." : line.toString();
+                g.drawString(txt, textX, py + normalFont.getSize());
             }
         }
 

@@ -58,6 +58,8 @@ public class BotCommandHandler {
     private static final Pattern BAN_LIST = Pattern.compile("^(封禁列表|查看封禁列表|banlist)$", Pattern.CASE_INSENSITIVE);
     // Admin delete: 删除 @QQ [ID]
     private static final Pattern ADMIN_DELETE = Pattern.compile("^删除\\s+(.+)$");
+    // Bot list: 看看人机
+    private static final Pattern BOT_LIST = Pattern.compile("^(看看人机|在线人机|人机列表)$");
 
     // Deny emoji
     private static final int EMOJI_DENY = 15;
@@ -127,6 +129,7 @@ public class BotCommandHandler {
 
         // Apply reply delay for recognized commands
         boolean isCommand = STATUS.matcher(text).matches() || HELP.matcher(text).matches()
+                || BOT_LIST.matcher(text).matches()
                 || APPLY.matcher(text).matches() || DELETE.matcher(text).matches()
                 || QUERY_SIMPLE.matcher(text).matches() || QUERY_ARGS.matcher(text).matches();
         if (isCommand || isAdmin) {
@@ -141,6 +144,9 @@ public class BotCommandHandler {
 
         // --- Help ---
         if (HELP.matcher(text).matches()) { handleHelp(event); return; }
+
+        // --- Bot list ---
+        if (BOT_LIST.matcher(text).matches()) { handleBots(event); return; }
 
         // --- Admin-only commands ---
         if (isAdmin) {
@@ -251,6 +257,27 @@ public class BotCommandHandler {
         event.react(true);
     }
 
+    // ======================== Bot list ========================
+
+    private void handleBots(OneBotEvent event) {
+        var online = org.bukkit.Bukkit.getOnlinePlayers();
+        List<String> bots = new ArrayList<>();
+        for (var p : online) {
+            String name = p.getName();
+            // Identify bots by common prefixes
+            if (name.startsWith("BOT_") || name.startsWith("bot_") || name.startsWith("Bot_")
+                    || name.startsWith("假人_") || name.contains("[Bot]")) {
+                bots.add(name);
+            }
+        }
+        if (bots.isEmpty()) {
+            event.replyAt("当前没有在线的人机。");
+        } else {
+            event.replyAt("在线人机 (" + bots.size() + "):\n" + String.join("\n", bots));
+        }
+        event.react(true);
+    }
+
     // ======================== Whitelist apply ========================
 
     private void handleApply(long qq, String playerId, OneBotEvent event) {
@@ -324,14 +351,19 @@ public class BotCommandHandler {
             return;
         }
 
-        // Try numeric
-        try {
-            targetQq = Long.parseLong(arg.replaceAll("[^0-9]", ""));
-            if (targetQq > 10000) {
-                showWhitelist(targetQq, "QQ" + targetQq, event);
-                return;
-            }
-        } catch (NumberFormatException ignored) {}
+        // Check if arg is wrapped in quotes (Chinese or English) → treat as player ID
+        boolean isQuoted = arg.matches("^[\"'\\u201c\\u201d\\u2018\\u2019].*[\"'\\u201c\\u201d\\u2018\\u2019]$");
+
+        // Try numeric (only if not quoted)
+        if (!isQuoted) {
+            try {
+                targetQq = Long.parseLong(arg.replaceAll("[^0-9]", ""));
+                if (targetQq > 10000) {
+                    showWhitelist(targetQq, "QQ" + targetQq, event);
+                    return;
+                }
+            } catch (NumberFormatException ignored) {}
+        }
 
         // Strip CQ codes and quotes
         String name = arg.replaceAll("\\[CQ:[^]]+\\]", "").trim();

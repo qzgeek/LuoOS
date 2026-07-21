@@ -63,6 +63,16 @@ public final class FoliaAuthListener implements Listener {
             return;
         }
 
+        // Maintenance mode: only OPs can join
+        if (plugin.getConfig().getBoolean("maintenance", false)) {
+            org.bukkit.OfflinePlayer op = org.bukkit.Bukkit.getOfflinePlayer(uuid);
+            if (!op.isOp()) {
+                event.disallow(AsyncPlayerPreLoginEvent.Result.KICK_OTHER,
+                        kickComponent("服务器正在维护中，仅管理员可进入。"));
+                return;
+            }
+        }
+
         // Whitelist/ban handled at Netty level by FoliaLoginUsernameValidationBypassService
 
         // Ban check — by UUID, also check DB (QQ bot blacklist)

@@ -145,4 +145,11 @@ public class OneBotServer extends WebSocketServer {
     public void stopServer() {
         try { stop(1000); } catch (Exception ignored) {}
     }
+
+    /** Send a raw string message to all connected sessions. */
+    public void broadcastRaw(String text) {
+        for (OneBotSession s : sessions.values()) {
+            try { s.conn.send(text); } catch (Exception ignored) {}
+        }
+    }
 }

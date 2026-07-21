@@ -21,6 +21,9 @@ import heos.folia.storage.FoliaWhitelistData;
 import heos.folia.utils.FoliaLoginUsernameValidationBypassService;
 import heos.folia.utils.FoliaNameResolver;
 import heos.folia.utils.FoliaTpsDisplayService;
+import heos.folia.utils.ResourceWorldManager;
+import heos.folia.utils.PlayerStatsTracker;
+import org.bukkit.Bukkit;
 import org.bukkit.command.PluginCommand;
 import org.bukkit.plugin.java.JavaPlugin;
 
@@ -35,6 +38,10 @@ public final class HeosFoliaPlugin extends JavaPlugin {
     private FoliaRecipeSyncService recipeSyncService;
     private FoliaLoginUsernameValidationBypassService bypassService;
     private OneBotServer botServer;
+    public BotStatusService statusService;
+    private ResourceWorldManager resourceWorldManager;
+    public OneBotServer getBotServer() { return botServer; }
+    PlayerStatsTracker statsTracker;
 
     @Override
     public void onEnable() {
@@ -71,9 +78,20 @@ public final class HeosFoliaPlugin extends JavaPlugin {
         FoliaBindUI bindUI = new FoliaBindUI(storage, this);
         getServer().getPluginManager().registerEvents(bindUI, this);
         FoliaBindCommands bindCommands = new FoliaBindCommands(accountBinding, storage, bindUI);
-        FoliaAdminCommands adminCommands = new FoliaAdminCommands(this, storage, whitelistData,
-                migrationCommands, authService, banCommands, bindCommands);
 
+        // Player stats tracker
+        this.statsTracker = new PlayerStatsTracker(this, storage);
+        getServer().getPluginManager().registerEvents(
+                new heos.folia.event.PlayerStatsListener(statsTracker), this);
+
+        // Auto-upgrade schema from old LuoOS versions
+        runLegacyUpgrade();
+
+        // Resource world manager
+        this.resourceWorldManager = new ResourceWorldManager(this);
+
+        FoliaAdminCommands adminCommands = new FoliaAdminCommands(this, storage, whitelistData,
+                migrationCommands, authService, banCommands, bindCommands, resourceWorldManager, statsTracker);
         getServer().getPluginManager().registerEvents(
                 new FoliaCommandInterceptor(this, authService, banCommands), this);
         getServer().getPluginManager().registerEvents(
@@ -111,6 +129,7 @@ public final class HeosFoliaPlugin extends JavaPlugin {
             String mcDisplayIp = getConfig().getString("bot.mc_display_ip", mcHost + ":" + mcPort);
             BotStatusService statusService = new BotStatusService(getLogger(), mcHost, mcPort, mcName, mcDesc,
                     mcDisplayIp, getDataFolder(), getConfig().getInt("bot.motd_bg_mask_alpha", 140));
+            this.statusService = statusService;
 
             BotDb botDb = new BotDb(getLogger(), storage);
             try {
@@ -167,6 +186,15 @@ public final class HeosFoliaPlugin extends JavaPlugin {
             }
         }
 
+        // Start resource world schedule
+        resourceWorldManager.start();
+
+        // Register PAPI expansion
+        if (Bukkit.getPluginManager().getPlugin("PlaceholderAPI") != null) {
+            new heos.folia.utils.LuoOSPlaceholderExpansion(statsTracker).register();
+            getLogger().info("PlaceholderAPI expansion registered");
+        }
+
         getLogger().info("Heos Folia enabled (UUID-based + Account Binding + Group Concurrency)");
         getLogger().info("Account binding: " + getConfig().getBoolean("enableAccountBinding", true));
         getLogger().info("Binding storage: " + bindingStorage);
@@ -182,8 +210,51 @@ public final class HeosFoliaPlugin extends JavaPlugin {
         if (recipeSyncService != null) recipeSyncService.close();
         if (bypassService != null) bypassService.close();
         if (botServer != null) botServer.stopServer();
+        if (resourceWorldManager != null) resourceWorldManager.close();
+        getLogger().info("Heos Folia disabled.");
     }
 
+    // ============ Legacy Upgrade ============
+
+    private void runLegacyUpgrade() {
+        java.io.File flag = new java.io.File(getDataFolder(), ".upgraded_v08");
+        if (flag.exists()) return;
+        getLogger().info("[Upgrade] Checking legacy data...");
+
+        // Add entities_killed column if old DB missing it
+        java.io.File db = new java.io.File(getDataFolder(), "player_data.db");
+        if (db.exists()) try {
+            var conn = storage.getConnection();
+            if (conn != null) synchronized (conn) {
+                try { conn.createStatement().execute("SELECT entities_killed FROM player_stats LIMIT 0"); }
+                catch (Exception e) {
+                    conn.createStatement().execute("ALTER TABLE player_stats ADD COLUMN entities_killed BIGINT DEFAULT 0");
+                    getLogger().info("[Upgrade] Added entities_killed column.");
+                }
+                try { conn.createStatement().execute("SELECT 1 FROM player_stats_daily LIMIT 0"); }
+                catch (Exception e) {
+                    conn.createStatement().execute("CREATE TABLE IF NOT EXISTS player_stats_daily ("
+                        + "uuid TEXT, date TEXT, play_time_seconds BIGINT DEFAULT 0, blocks_mined BIGINT DEFAULT 0,"
+                        + "blocks_placed BIGINT DEFAULT 0, chat_chars BIGINT DEFAULT 0, entities_killed BIGINT DEFAULT 0,"
+                        + "PRIMARY KEY (uuid, date))");
+                    getLogger().info("[Upgrade] Created player_stats_daily table.");
+                }
+            }
+        } catch (Exception ignored) {}
+
+        // Migrate HEOS data dir to LuoOS
+        java.io.File heosDir = new java.io.File(getDataFolder().getParent(), "heos");
+        java.io.File heosDb = new java.io.File(heosDir, "player_data.db");
+        if (heosDb.exists() && !db.exists()) try {
+            java.nio.file.Files.copy(heosDb.toPath(), db.toPath());
+            getLogger().info("[Upgrade] HEOS player_data.db migrated.");
+        } catch (Exception e) {
+            getLogger().warning("[Upgrade] HEOS migration failed: " + e.getMessage());
+        }
+
+        try { flag.createNewFile(); } catch (Exception ignored) {}
+        getLogger().info("[Upgrade] Complete.");
+    }
     private void registerCommands(FoliaBanCommands banCommands, FoliaAdminCommands adminCommands) {
         FoliaAuthCommands cmds = new FoliaAuthCommands(authService);
         bind("login", cmds); bind("register", cmds); bind("changepassword", cmds);

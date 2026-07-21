@@ -394,7 +394,9 @@ public final class FoliaAuthService {
     }
 
     private boolean isLoginBypassed(Player player, String ip) {
-        // Check IP whitelist
+        // Lophine bots: check via reflection (Bot interface)
+        if (isLophineBot(player)) return true;
+        // Check IP whitelist (localhost always bypassed for bot compat)
         var ips = plugin.getConfig().getStringList("loginBypassIps");
         for (String bip : ips) {
             if (ip.equals(bip.trim())) return true;
@@ -406,6 +408,15 @@ public final class FoliaAuthService {
             if (name.equals(bn.trim()) || name.startsWith(bn.trim())) return true;
         }
         return false;
+    }
+
+    private boolean isLophineBot(Player player) {
+        try {
+            Class<?> botInterface = Class.forName("org.leavesmc.leaves.entity.bot.Bot");
+            return botInterface.isInstance(player);
+        } catch (ClassNotFoundException e) {
+            return false;
+        }
     }
 
     private void decrementIp(String ip) {
