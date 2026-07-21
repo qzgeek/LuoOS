@@ -1,76 +1,308 @@
-# LuoOS 客户端与 QQ 机器人插件
+# LuoOS v0.08-dev 使用文档
 
-> 本项目 Fork 自 [chara2015/heos-public](https://github.com/chara2015/heos-public)，在其基础上进行了大量功能扩展和重构。
+LuoOS 是一款面向 Folia 服务器的综合管理插件，提供登录认证、账号绑定、QQ机器人、玩家统计排行榜、资源世界自动刷新等功能。
 
-LuoOS 是一个 Folia 服务端综合性插件，集成了：
+## 支持的 Minecraft 版本
 
-- **玩家认证系统**（登录/注册/修改密码，支持 AuthMe 数据迁移）
-- **账号绑定系统**（星型拓扑 UUID 重映射，Netty 包层拦截）
-- **内嵌 QQ 机器人**（OneBot v11 正向 WebSocket——白名单管理、服务器状态卡片、群管理）
-- **统一数据库**（SQLite / MySQL 双支持，插件与 Bot 共享）
+| 版本范围 | Jar 文件 |
+|---------|---------|
+| 1.20 - 1.20.1 | `luoos-folia-mc1.20-1.20.1-0.08-dev.jar` |
+| 1.20.2 - 1.20.3 | `luoos-folia-mc1.20.2-1.20.3-0.08-dev.jar` |
+| 1.20.4 | `luoos-folia-mc1.20.4-0.08-dev.jar` |
+| 1.20.5 - 1.20.6 | `luoos-folia-mc1.20.5-1.20.6-0.08-dev.jar` |
+| 1.21 - 1.21.4 | `luoos-folia-mc1.21-1.21.4-0.08-dev.jar` |
+| 1.21.5 | `luoos-folia-mc1.21.5-0.08-dev.jar` |
+| 1.21.6 - 1.21.7 | `luoos-folia-mc1.21.6-1.21.7-0.08-dev.jar` |
+| 1.21.8 - 1.21.10 | `luoos-folia-mc1.21.8-1.21.10-0.08-dev.jar` |
+| 1.21.11 | `luoos-folia-mc1.21.11-0.08-dev.jar` |
+| 26.1 | `luoos-folia-mc26.1-0.08-dev.jar` |
+| 26.1.1 | `luoos-folia-mc26.1.1-0.08-dev.jar` |
+| 26.1.2 | `luoos-folia-mc26.1.2-0.08-dev.jar` |
 
-## 功能概览
-
-### 玩家认证
-- `/los login <密码>` — 登录
-- `/los register <密码> <确认>` — 注册
-- `/los changepassword <旧> <新>` — 修改密码
-- 支持 AuthMe 密码迁移：读取 AuthMe 配置文件自动识别数据库后端
-- 兼容多种密码哈希格式：SHA256 双重哈希、BCrypt、PBKDF2
-
-### 账号绑定
-- 星型拓扑：多个绑定账号 → 一个目标（不允许多级链式绑定）
-- UUID 重映射在 Netty 级别实现，对下游插件透明
-- 聊天 TUI / 箱子 GUI 双界面管理
-
-### QQ 机器人（OneBot v11）
-- `白名单 <游戏ID>` — 申请白名单（自动将 QQ 号绑定到 MC 账号）
-- `删除 <ID>` — 删除自己的白名单
-- `查询白名单` — 查看自己的白名单
-- `查询白名单 @QQ` — 管理员查看指定 QQ 的白名单
-- `服务器还活着吗` — 查询服务器状态卡片（图片）
-- `封禁 @QQ [时长]` / `解禁 @QQ` — 管理员封禁/解封用户
-- `help` / `帮助` / `菜单` — 显示命令帮助
-- 支持表情回应：✅ 成功 / ❌ 失败 / 🚫 拒绝
-
-### 数据库
-- 默认使用 SQLite（即开即用）
-- 支持 MySQL，可通过配置文件切换
-- 数据库表在插件和 Bot 之间共享
-- 支持从 AuthMe 插件迁移玩家密码
-
-## 构建
-
+推荐启动命令（Folia 26.1+）：
 ```bash
-./gradlew :folia:1.21.11:shadowJar --no-daemon
+java --add-modules=jdk.incubator.vector -jar lophine-server.jar --nogui
 ```
 
-要求 JDK 21。
+---
 
-产物位置：`folia/versions/1.21.11/build/libs/luoos-folia-mc1.21.11-0.06.jar`
+## 一、安装与升级
 
-## 配置
+### 安装
 
-参见 `folia/src/main/resources/config.yml`，主要配置项：
+1. 将对应版本的 jar 放入 `plugins/` 目录
+2. 安装依赖插件：**PlaceholderAPI**（统计功能需要）、**Worlds 4.2.2**（资源世界功能需要）
+3. 启动服务器，自动生成 `plugins/luoos/config.yml`
 
-| 配置路径 | 说明 | 默认值 |
-|---------|------|--------|
-| `authentication.enabled` | 是否启用认证 | true |
-| `enableAccountBinding` | 是否启用账号绑定 | true |
-| `bindingStorageBackend` | 数据库后端 | sqlite |
-| `bot.enabled` | 是否启用 QQ 机器人 | false |
-| `bot.port` | Bot 监听端口 | 10100 |
-| `bot.access_token` | OneBot 连接 Token | 空 |
-| `bot.qq_groups` | 允许的 QQ 群号列表 | 空（允许所有） |
-| `bot.status_trigger` | 状态查询触发词 | 服务器还活着吗 |
+### 从旧版本升级
 
-## 迁移 AuthMe 数据
+v0.08 内置自动升级系统：
+- 首次启动时自动检测旧版数据库（HEOS/LuoOS v0.07），自动迁移数据
+- 自动为旧 `player_stats` 表添加新字段（entities_killed）
+- 自动创建 `player_stats_daily` 日统计表
+- 升级完成后创建 `.upgraded_v08` 标记文件，不会重复升级
 
-1. 在控制台执行：`/los migrate-authme plugins/AuthMe`
-2. 插件会自动读取 AuthMe 的 `config.yml`，识别数据库后端
-3. 迁移完成后，玩家使用原 AuthMe 密码登录即可
-4. 首次成功登录后，密码哈希会自动升级为原生 PBKDF2 格式
+无需手动操作，安装新版 jar 后直接重启即可。
 
-## 开源协议
+---
 
-MIT License
+## 二、登录认证
+
+### 基本配置
+
+```yaml
+enableAuthentication: true   # 启用登录认证
+language: zh_cn              # 语言
+loginTimeout: 60             # 登录超时(秒)
+minPasswordLength: 4         # 密码最小长度
+maxPasswordLength: 32        # 密码最大长度
+```
+
+### 离线玩家
+
+```yaml
+allowOfflinePlayers: true    # 允许离线玩家进入在线模式服
+allowMoreOfflineUsernameCharacters: true  # 允许中文名
+separateOnlineOfflineAccounts: true       # 同名正版/离线数据分离
+```
+
+### 绕过登录
+
+某些玩家（如假人、Bot）不需要登录，配置白名单：
+
+```yaml
+loginBypassIps:
+  - "127.0.0.1"
+  - "192.168.1.100"
+
+loginBypassNames:
+  - "BOT_"      # 前缀匹配，所有 BOT_ 开头的玩家无需登录
+```
+
+> **Lophine 假人**：v0.08 自动检测 Lophine 内置假人（Bot 接口），无需手动配置白名单。
+
+---
+
+## 三、账号绑定
+
+允许多个小号绑定到一个主账号，共享数据：
+
+```yaml
+enableAccountBinding: true   # 启用绑定系统
+bindingStorage: sqlite       # 存储方式: sqlite 或 mysql
+```
+
+玩家命令：
+- `/los bind <主账号名>` — 绑定到主账号
+- `/los unbind` — 解绑
+
+管理员命令：
+- `/los bindinfo <玩家>` — 查看绑定关系
+
+---
+
+## 四、QQ机器人（OneBot）
+
+### 配置
+
+```yaml
+bot:
+  enabled: true
+  host: 0.0.0.0              # WebSocket 监听地址
+  port: 10100                # 监听端口
+  access_token: "你的token"   # 与QQ框架一致
+  qq_groups: [123456]        # 允许的群聊列表
+  max_per_qq: 3              # 每个QQ最大白名单数
+  allowed_id_chars: "a-zA-Z0-9_-."   # 允许的ID字符
+  max_id_length: 16          # ID最大长度
+  status_trigger: "服务器还活着吗"    # 触发状态卡片
+  rate_limit_max: 5          # 频率限制(次)
+  rate_limit_window: 60      # 时间窗口(秒)
+  reply_delay_min_ms: 1000   # 回复最小延迟
+  reply_delay_max_ms: 2000   # 回复最大延迟
+  debug_log: false           # 调试日志
+  mc_display_name: "LuoOS服务器"
+  mc_description: "欢迎来到LuoOS"
+  mc_display_ip: "127.0.0.1:25565"
+```
+
+QQ框架（NapCat/LLOneBot）中配置反向WebSocket地址为 `ws://服务器IP:10100`。
+
+### 群聊命令
+
+| 命令 | 说明 |
+|------|------|
+| `服务器还活着吗` | 返回状态卡片 |
+| `白名单 add <ID>` | 申请白名单 |
+| `白名单 del <ID>` | 删除白名单 |
+| `白名单 list` | 查看我的白名单 |
+| `看看人机` | 查看在线假人列表 |
+
+---
+
+## 五、玩家统计与排行榜
+
+### 统计项目
+
+- **在线时长** (`play_time_seconds`)
+- **挖掘方块** (`blocks_mined`)
+- **放置方块** (`blocks_placed`)
+- **聊天字数** (`chat_chars`)
+- **击杀实体** (`entities_killed`)
+
+### 游戏内命令
+
+| 命令 | 权限 | 说明 |
+|------|------|------|
+| `/los stats` | 玩家 | 查看自己的统计 |
+| `/los stats <玩家>` | 玩家 | 查看他人统计 |
+| `/los statstop` | OP | 在线时长排行榜 |
+| `/los statstop <stat>` | OP | 指定统计排行 |
+| `/los statstop <stat> <时间>` | OP | 时间范围排行 |
+| `/los papi_test` | OP | 显示全部PAPI占位符 |
+
+时间格式：`7d`(7天) `1w`(1周) `1m`(1月) `1q`(1季) `1y`(1年)
+
+示例：
+```
+/los statstop blocks_mined       # 挖方块总排行
+/los statstop entities_killed 7d # 7天击杀排行
+```
+
+### PAPI 占位符
+
+| 占位符 | 说明 |
+|--------|------|
+| `%luoos_stat_<stat>%` | 指定统计数值 |
+| `%luoos_stat_<stat>_<时间>%` | 时间范围统计 |
+| `%luoos_stat_rank_<stat>%` | 排名 |
+| `%luoos_stat_top_name_<stat>_<N>%` | 第N名名字 |
+| `%luoos_stat_top_value_<stat>_<N>%` | 第N名数值 |
+
+统计关键字：`playtime`, `blocks_mined`, `blocks_placed`, `chat_chars`, `entities_killed`
+
+示例：
+```
+%luoos_stat_playtime%              → 4小时32分
+%luoos_stat_blocks_mined_7d%       → 本周挖方块数
+%luoos_stat_rank_entities_killed%  → 击杀排名 #3
+%luoos_stat_top_name_playtime_1%   → 在线第一名名字
+%luoos_stat_top_value_blocks_mined_7d_2% → 7天挖方块第2名数值
+```
+
+---
+
+## 六、资源世界
+
+### 依赖
+
+需要 **Worlds 4.2.2** 插件。
+
+### 配置
+
+```yaml
+resourceWorld:
+  enabled: true              # 启用资源世界
+  refreshIntervalMinutes: 720 # 刷新间隔(分钟), 0=禁用自动刷新
+  nether: true               # 创建资源下界
+  end: true                  # 创建资源终界
+```
+
+### 命令
+
+| 命令 | 权限 | 说明 |
+|------|------|------|
+| `/los resource` | 玩家 | 传送到资源世界 |
+| `/los resourcerefresh` | OP | 立即刷新资源世界 |
+
+### 工作原理
+
+1. 服务器启动时自动创建资源世界（含下界/终界）
+2. 世界名称为 `res_world`、`res_nether`、`res_end`，位于 `luoos_resource` 分组
+3. 到达刷新间隔时，全服广播 30 秒预警 → 删除旧世界 → 随机种子生成新世界 → 全服广播完成
+4. 刷新跨重启持久化（通过 config.yml 存储时间戳）
+
+---
+
+## 七、维护模式
+
+```yaml
+maintenance: false  # 维护模式开关
+```
+
+命令：
+- `/los maintenance on` — 开启维护模式（仅OP可进入）
+- `/los maintenance off` — 关闭
+- `/los maintenance status` — 查看状态
+
+---
+
+## 八、其他功能
+
+### 白名单
+
+```yaml
+enableWhitelist: true  # 启用LuoOS白名单
+```
+
+命令：`/los whitelist add/remove/list <玩家>`
+
+### 封禁系统
+
+```yaml
+enableCustomBan: true
+```
+
+命令：`/los ban/unban/banlist <玩家>`
+
+### 数据迁移
+
+用于正版/离线账号间数据转移：
+```yaml
+enablePlayerDataMigration: false
+migrationBanSeconds: 30
+```
+
+命令：`/los migrate <源玩家> <目标玩家>`
+
+### TPS 显示
+
+```yaml
+enableAutoLogTps: true
+autoLogTpsDelayTicks: 20
+```
+
+### 配方同步
+
+```yaml
+enableRecipeViewerSync: true  # 1.21.2+
+```
+
+### 会话限制
+
+```yaml
+maxConcurrentSessionsPerIp: -1  # 同IP最大在线数, -1=不限
+```
+
+### 登录保护
+
+```yaml
+usernameLoginFailureLimit: 5          # 连续失败次数
+usernameLoginFailureLockSeconds: 30   # 锁定时间(秒)
+```
+
+---
+
+## 九、权限节点
+
+| 权限 | 说明 |
+|------|------|
+| `luoos.admin` | 管理员命令权限 |
+
+---
+
+## 项目信息
+
+- 作者: chara201x, qzgeek (黔中极客)
+- GitHub: https://github.com/qzgeek/heos-public
+- 分支: main | 标签: v0.08-dev
