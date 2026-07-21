@@ -621,6 +621,13 @@ public final class FoliaAdminCommands implements CommandExecutor, TabCompleter {
                     + ChatColor.GRAY + " - " + ChatColor.YELLOW + tv
                     + ChatColor.DARK_GRAY + "  (%luoos_stat_top_value_" + st + "_7d_1%)");
         }
+        // Resource world refresh countdown
+        sender.sendMessage(ChatColor.YELLOW + "--- 资源世界刷新倒计时 ---");
+        String refPH = "%luoos_resource_refresh%";
+        String refVal = me.clip.placeholderapi.PlaceholderAPI.setPlaceholders(
+                (org.bukkit.OfflinePlayer) sender, refPH);
+        sender.sendMessage(ChatColor.WHITE + "  距离下次刷新: " + ChatColor.AQUA + refVal
+                + ChatColor.DARK_GRAY + "  (" + refPH + ")");
         sender.sendMessage(ChatColor.GOLD + "======================================");
     }
 

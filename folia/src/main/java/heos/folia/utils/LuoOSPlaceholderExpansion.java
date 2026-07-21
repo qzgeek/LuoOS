@@ -23,9 +23,11 @@ public class LuoOSPlaceholderExpansion extends PlaceholderExpansion {
     private static final Pattern TIME_SUFFIX = Pattern.compile("_(\\d+)([dwmqy])$");
 
     private final PlayerStatsTracker tracker;
+    private final ResourceWorldManager resourceWorldManager;
 
-    public LuoOSPlaceholderExpansion(PlayerStatsTracker tracker) {
+    public LuoOSPlaceholderExpansion(PlayerStatsTracker tracker, ResourceWorldManager resourceWorldManager) {
         this.tracker = tracker;
+        this.resourceWorldManager = resourceWorldManager;
     }
 
     @Override public @NotNull String getIdentifier() { return "luoos"; }
@@ -35,6 +37,11 @@ public class LuoOSPlaceholderExpansion extends PlaceholderExpansion {
 
     @Override
     public String onRequest(OfflinePlayer player, @NotNull String params) {
+        // Resource world refresh countdown
+        if (params.equals("resource_refresh")) {
+            return formatResourceRefresh();
+        }
+
         // All LuoOS stat placeholders start with "stat_"
         if (!params.startsWith("stat_")) return null;
         String rest = params.substring(5); // strip "stat_"
@@ -80,6 +87,34 @@ public class LuoOSPlaceholderExpansion extends PlaceholderExpansion {
     }
 
     // ============ Helpers ============
+
+    /**
+     * Format remaining time until next resource world refresh in Chinese.
+     * Returns like "12小时30分钟", "5天3小时", "即将刷新", or "未启用".
+     */
+    private String formatResourceRefresh() {
+        if (resourceWorldManager == null) return "未启用";
+        long nextRefresh = resourceWorldManager.getNextRefreshTime();
+        if (nextRefresh <= 0) return "未启用";
+
+        long now = System.currentTimeMillis();
+        long remaining = nextRefresh - now;
+
+        if (remaining <= 0) return "即将刷新";
+
+        long totalSeconds = remaining / 1000;
+        long days = totalSeconds / 86400;
+        long hours = (totalSeconds % 86400) / 3600;
+        long minutes = (totalSeconds % 3600) / 60;
+
+        StringBuilder sb = new StringBuilder();
+        if (days > 0) sb.append(days).append("天");
+        if (hours > 0) sb.append(hours).append("小时");
+        if (days == 0 && hours == 0 && minutes > 0) sb.append(minutes).append("分钟");
+        if (days == 0 && hours == 0 && minutes == 0 && totalSeconds > 0) sb.append(totalSeconds).append("秒");
+
+        return sb.length() > 0 ? sb.toString() : "即将刷新";
+    }
 
     private String handleTopQuery(String tail, int days, boolean returnValue) {
         // tail = <stat>_<N>  or  <stat>_<time>_<N>

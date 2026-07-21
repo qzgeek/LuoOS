@@ -191,7 +191,7 @@ public final class HeosFoliaPlugin extends JavaPlugin {
 
         // Register PAPI expansion
         if (Bukkit.getPluginManager().getPlugin("PlaceholderAPI") != null) {
-            new heos.folia.utils.LuoOSPlaceholderExpansion(statsTracker).register();
+            new heos.folia.utils.LuoOSPlaceholderExpansion(statsTracker, resourceWorldManager).register();
             getLogger().info("PlaceholderAPI expansion registered");
         }
 

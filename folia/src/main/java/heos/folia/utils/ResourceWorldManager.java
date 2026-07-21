@@ -52,6 +52,11 @@ public class ResourceWorldManager implements AutoCloseable {
     public String currentSeed() {
         return plugin.getConfig().getString(CFG_SEED, null);
     }
+
+    /** Millis timestamp of next scheduled refresh (from config). */
+    public long getNextRefreshTime() {
+        return plugin.getConfig().getLong(CFG_NEXT, 0);
+    }
     // ========== Teleport ==========
 
     public boolean teleportToResource(Player player) {
