@@ -179,7 +179,16 @@ public class ResourceWorldManager implements AutoCloseable {
     }
 
     private boolean worldExists(String seed) {
-        return resourceWorld != null;
+        if (resourceWorld != null) return true;
+        // Check if world files exist on disk (survives restarts)
+        java.io.File dimsDir = new java.io.File(Bukkit.getWorldContainer(), "world/dimensions/" + NAMESPACE);
+        if (!dimsDir.isDirectory()) return false;
+        java.io.File[] files = dimsDir.listFiles();
+        if (files == null) return false;
+        for (java.io.File f : files) {
+            if (f.getName().contains(PREFIX)) return true;
+        }
+        return false;
     }
 
     private void scheduleRefresh(int intervalMinutes) {
