@@ -179,16 +179,25 @@ QQ框架（NapCat/LLOneBot）中配置反向WebSocket地址为 `ws://服务器IP
 | `%luoos_stat_top_name_<stat>_<N>%` | 第N名名字 |
 | `%luoos_stat_top_value_<stat>_<N>%` | 第N名数值 |
 
-统计关键字：`playtime`, `blocks_mined`, `blocks_placed`, `chat_chars`, `entities_killed`
+统计关键字：`play_time_seconds`, `blocks_mined`, `blocks_placed`, `chat_chars`, `entities_killed`
 
-示例：
-```
-%luoos_stat_playtime%              → 4小时32分
-%luoos_stat_blocks_mined_7d%       → 本周挖方块数
-%luoos_stat_rank_entities_killed%  → 击杀排名 #3
-%luoos_stat_top_name_playtime_1%   → 在线第一名名字
-%luoos_stat_top_value_blocks_mined_7d_2% → 7天挖方块第2名数值
-```
+**全部 PAPI 占位符：**
+
+| 占位符 | 说明 | 示例 |
+|--------|------|------|
+| `%luoos_stat_<stat>%` | 指定统计数值（总计） | `%luoos_stat_play_time_seconds%` → `4小时32分` |
+| `%luoos_stat_<stat>_<时间>%` | 时间范围统计 | `%luoos_stat_blocks_mined_7d%` |
+| `%luoos_stat_rank_<stat>%` | 排名（总计） | `%luoos_stat_rank_entities_killed%` |
+| `%luoos_stat_rank_<stat>_<时间>%` | 时间范围排名 | `%luoos_stat_rank_blocks_mined_7d%` |
+| `%luoos_stat_top_name_<stat>_<N>%` | 第N名名字（总计） | `%luoos_stat_top_name_play_time_seconds_1%` |
+| `%luoos_stat_top_value_<stat>_<N>%` | 第N名数值（总计） | `%luoos_stat_top_value_play_time_seconds_1%` |
+| `%luoos_stat_top_name_<stat>_<时间>_<N>%` | 时间范围第N名名字 | `%luoos_stat_top_name_blocks_mined_7d_1%` |
+| `%luoos_stat_top_value_<stat>_<时间>_<N>%` | 时间范围第N名数值 | `%luoos_stat_top_value_blocks_mined_7d_2%` |
+| `%luoos_resource_refresh%` | 资源世界刷新倒计时（中文） | → `22天16小时` / `即将刷新` / `未启用` |
+
+时间后缀：`1d`(1天) `7d`(7天) `30d`(30天) `1w`(1周) `1m`(1月) `1q`(1季) `1y`(1年)
+
+> **注意**：`<stat>` 使用下划线格式。完整统计关键字列表见下方"统计项目"。
 
 ---
 
@@ -203,10 +212,13 @@ QQ框架（NapCat/LLOneBot）中配置反向WebSocket地址为 `ws://服务器IP
 ```yaml
 resourceWorld:
   enabled: true              # 启用资源世界
-  refreshIntervalMinutes: 720 # 刷新间隔(分钟), 0=禁用自动刷新
+  refreshDayOfMonth: 25      # 每月刷新日（默认25号）
+  refreshHour: 8             # 刷新时间（默认8点，服务器时区）
   nether: true               # 创建资源下界
   end: true                  # 创建资源终界
 ```
+
+**注意**：v0.08 使用固定日期刷新策略，不再使用 `refreshIntervalMinutes`。每次刷新后自动计算下一个月的刷新时间，服务器重启后倒计时不会重置。
 
 ### 命令
 

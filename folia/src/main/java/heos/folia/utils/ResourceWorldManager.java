@@ -157,25 +157,78 @@ public class ResourceWorldManager implements AutoCloseable {
             return;
         }
 
-        int intervalMinutes = plugin.getConfig().getInt("resourceWorld.refreshIntervalMinutes", 0);
-        if (intervalMinutes <= 0) {
-            logger.info("[ResourceWorld] Auto-refresh disabled");
-            return;
-        }
-
         String seed = currentSeed();
         if (seed == null || !worldExists(seed)) {
-            // Create worlds, then schedule with a fresh nextRefresh timestamp
+            // Create worlds, then schedule
             createResourceWorldsAsync(() -> {
-                long now = System.currentTimeMillis();
-                long next = now + (long) intervalMinutes * 60 * 1000;
-                plugin.getConfig().set(CFG_NEXT, next);
+                updateNextRefresh();
                 plugin.saveConfig();
-                scheduleRefresh(intervalMinutes);
+                scheduleFixedDate();
             });
         } else {
-            scheduleRefresh(intervalMinutes);
+            scheduleFixedDate();
         }
+    }
+
+    /**
+     * Calculate the next monthly scheduled refresh time from config.
+     * Config keys:
+     *   resourceWorld.refreshDayOfMonth — day of month (default 25)
+     *   resourceWorld.refreshHour       — hour of day (default 8, local timezone)
+     */
+    private long computeNextRefresh() {
+        int dayOfMonth = plugin.getConfig().getInt("resourceWorld.refreshDayOfMonth", 25);
+        int hour = plugin.getConfig().getInt("resourceWorld.refreshHour", 8);
+        java.util.Calendar cal = java.util.Calendar.getInstance();
+        cal.set(java.util.Calendar.HOUR_OF_DAY, hour);
+        cal.set(java.util.Calendar.MINUTE, 0);
+        cal.set(java.util.Calendar.SECOND, 0);
+        cal.set(java.util.Calendar.MILLISECOND, 0);
+        cal.set(java.util.Calendar.DAY_OF_MONTH, Math.min(dayOfMonth, cal.getActualMaximum(java.util.Calendar.DAY_OF_MONTH)));
+        long candidate = cal.getTimeInMillis();
+        if (candidate <= System.currentTimeMillis()) {
+            // Already passed this month — advance to next month
+            cal.add(java.util.Calendar.MONTH, 1);
+            cal.set(java.util.Calendar.DAY_OF_MONTH, Math.min(dayOfMonth, cal.getActualMaximum(java.util.Calendar.DAY_OF_MONTH)));
+            candidate = cal.getTimeInMillis();
+        }
+        return candidate;
+    }
+
+    private void updateNextRefresh() {
+        long next = computeNextRefresh();
+        plugin.getConfig().set(CFG_NEXT, next);
+        plugin.saveConfig();
+        logger.info("[ResourceWorld] Next refresh set to " + new java.util.Date(next));
+    }
+
+    private void scheduleFixedDate() {
+        long stored = plugin.getConfig().getLong(CFG_NEXT, 0);
+        long now = System.currentTimeMillis();
+        // If stored is missing or stale (more than 35 days ago), recompute
+        if (stored <= 0 || (now - stored) > 35L * 24 * 60 * 60 * 1000) {
+            stored = computeNextRefresh();
+            plugin.getConfig().set(CFG_NEXT, stored);
+            plugin.saveConfig();
+        }
+        // If we missed the refresh time, execute now
+        if (now >= stored) {
+            logger.info("[ResourceWorld] Missed scheduled refresh — executing now");
+            refreshResourceWorlds();
+            updateNextRefresh();
+            stored = plugin.getConfig().getLong(CFG_NEXT, 0);
+        }
+        // Poll every 60 seconds
+        final long finalStored = stored;
+        Bukkit.getAsyncScheduler().runAtFixedRate(plugin, task -> {
+            long cur = System.currentTimeMillis();
+            long nxt = plugin.getConfig().getLong(CFG_NEXT, 0);
+            if (nxt > 0 && cur >= nxt) {
+                Bukkit.getGlobalRegionScheduler().run(plugin, t2 -> refreshResourceWorlds());
+                updateNextRefresh();
+            }
+        }, 60, 60, TimeUnit.SECONDS);
+        logger.info("[ResourceWorld] Schedule active: next refresh at " + new java.util.Date(stored));
     }
 
     private boolean worldExists(String seed) {
@@ -255,11 +308,8 @@ public class ResourceWorldManager implements AutoCloseable {
                                             resourceEnd = ew;
                                             Bukkit.getGlobalRegionScheduler().run(plugin, t3 -> {
                                                 broadcastRefresh("§a[资源世界] 资源世界刷新完毕！使用 /los resource 进入。");
-                                                int interval = plugin.getConfig().getInt("resourceWorld.refreshIntervalMinutes", 0);
-                                                long next = System.currentTimeMillis() + (long) interval * 60 * 1000;
-                                                plugin.getConfig().set(CFG_NEXT, next);
-                                                plugin.saveConfig();
-                                                logger.info("[ResourceWorld] Next refresh: " + new java.util.Date(next));
+                                                updateNextRefresh();
+                                                logger.info("[ResourceWorld] Next refresh: " + new java.util.Date(plugin.getConfig().getLong(CFG_NEXT, 0)));
                                                 refreshing = false;
                                             });
                                         });

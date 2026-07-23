@@ -628,6 +628,37 @@ public final class FoliaAdminCommands implements CommandExecutor, TabCompleter {
                 (org.bukkit.OfflinePlayer) sender, refPH);
         sender.sendMessage(ChatColor.WHITE + "  距离下次刷新: " + ChatColor.AQUA + refVal
                 + ChatColor.DARK_GRAY + "  (" + refPH + ")");
+        // Rank with time ranges
+        for (String st : stats) {
+            String[] moreTimes = {"1d", "7d", "30d", "1w", "1m", "1q", "1y"};
+            String[] moreLabels = {"1天", "7天", "30天", "1周", "1月", "1季", "1年"};
+            for (int k = 0; k < moreTimes.length; k++) {
+                String rkPH = "%luoos_stat_rank_" + st + "_" + moreTimes[k] + "%";
+                String rkV = me.clip.placeholderapi.PlaceholderAPI.setPlaceholders(
+                        (org.bukkit.OfflinePlayer) sender, rkPH);
+                if (!rkV.equals("0") && !rkV.equals("")) {
+                    sender.sendMessage(ChatColor.DARK_GRAY + "  " + moreLabels[k] + "排名: "
+                            + ChatColor.GREEN + rkV + ChatColor.DARK_GRAY + "  (" + rkPH + ")");
+                    break; // show first time range that has a rank
+                }
+            }
+        }
+        // Top name/value with various time ranges for first stat
+        String firstStat = stats[0];
+        String[] timeSuffixes = {"1d", "7d", "30d", "1w", "1m", "1q", "1y"};
+        String[] tLabels = {"1天", "7天", "30天", "1周", "1月", "1季", "1年"};
+        sender.sendMessage(ChatColor.YELLOW + "--- 排行 (带时间范围) ---");
+        for (int k = 0; k < timeSuffixes.length; k++) {
+            String tnPH = "%luoos_stat_top_name_" + firstStat + "_" + timeSuffixes[k] + "_1%";
+            String tvPH = "%luoos_stat_top_value_" + firstStat + "_" + timeSuffixes[k] + "_1%";
+            String tn = me.clip.placeholderapi.PlaceholderAPI.setPlaceholders(
+                    (org.bukkit.OfflinePlayer) sender, tnPH);
+            String tv = me.clip.placeholderapi.PlaceholderAPI.setPlaceholders(
+                    (org.bukkit.OfflinePlayer) sender, tvPH);
+            sender.sendMessage(ChatColor.WHITE + "  " + tLabels[k] + "榜#1: " + ChatColor.AQUA + tn
+                    + ChatColor.GRAY + " - " + ChatColor.YELLOW + tv
+                    + ChatColor.DARK_GRAY + "  (" + tvPH + ")");
+        }
         sender.sendMessage(ChatColor.GOLD + "======================================");
     }
 
