@@ -59,8 +59,29 @@ public class ResourceWorldManager implements AutoCloseable {
     }
     // ========== Teleport ==========
 
+    /** Apply default gamerules to resource worlds (keepInventory, etc.). */
+    private void applyResourceGamerules(World world) {
+        if (world == null) return;
+        Bukkit.getGlobalRegionScheduler().run(plugin, task -> {
+            world.setGameRule(GameRule.KEEP_INVENTORY, true);
+            logger.fine("[ResourceWorld] Gamerules applied to " + world.getName());
+        });
+    }
+
+    // ========== Teleport ==========
+
     public boolean teleportToResource(Player player) {
         World world = resourceWorld;
+        if (world == null) {
+            // Attempt fallback resolution (survives race between start() and first teleport)
+            for (World w : Bukkit.getWorlds()) {
+                if (MAIN_KEY.equals(w.getName())) {
+                    resourceWorld = w;
+                    world = w;
+                    break;
+                }
+            }
+        }
         if (world == null) {
             player.sendMessage(ChatColor.RED + "资源世界尚未就绪，请稍后再试。");
             return false;
@@ -97,14 +118,17 @@ public class ResourceWorldManager implements AutoCloseable {
             createOneWorld(MAIN_KEY, owDim, seed)
                 .thenAccept(w -> {
                     resourceWorld = w;
+                    applyResourceGamerules(w);
                     CompletableFuture<World> netherFuture = nether
                         ? createOneWorld(NETHER_KEY, nDim, seed) : CompletableFuture.completedFuture(null);
                     netherFuture.thenAccept(nw -> {
                         resourceNether = nw;
+                        if (nw != null) applyResourceGamerules(nw);
                         CompletableFuture<World> endFuture = end
                             ? createOneWorld(END_KEY, eDim, seed) : CompletableFuture.completedFuture(null);
                         endFuture.thenAccept(ew -> {
                             resourceEnd = ew;
+                            if (ew != null) applyResourceGamerules(ew);
                             logger.info("[ResourceWorld] Worlds ready (seed: " + seedStr + ")");
                             if (onDone != null) onDone.run();
                         });
@@ -159,14 +183,50 @@ public class ResourceWorldManager implements AutoCloseable {
 
         String seed = currentSeed();
         if (seed == null || !worldExists(seed)) {
-            // Create worlds, then schedule
+            // No existing worlds — create fresh, then schedule
             createResourceWorldsAsync(() -> {
                 updateNextRefresh();
                 plugin.saveConfig();
                 scheduleFixedDate();
             });
         } else {
+            // Worlds exist on disk — resolve references first, then schedule
+            resolveExistingWorlds();
             scheduleFixedDate();
+        }
+    }
+
+    /**
+     * Resolve existing resource worlds from Bukkit after a restart.
+     * After onEnable(), resourceWorld/resourceNether/resourceEnd are null
+     * even though the worlds exist on disk. This scans Bukkit.getWorlds()
+     * for worlds whose name contains the PREFIX and sets the references.
+     */
+    private void resolveExistingWorlds() {
+        resourceWorld = null;
+        resourceNether = null;
+        resourceEnd = null;
+        for (World w : Bukkit.getWorlds()) {
+            String name = w.getName();
+            if (MAIN_KEY.equals(name)) {
+                resourceWorld = w;
+            } else if (NETHER_KEY.equals(name)) {
+                resourceNether = w;
+            } else if (END_KEY.equals(name)) {
+                resourceEnd = w;
+            }
+        }
+        if (resourceWorld != null) {
+            logger.info("[ResourceWorld] Resolved existing worlds (seed: " + currentSeed() + ")");
+        } else {
+            // Worlds exist on disk but not loaded by Worlds plugin — trigger fresh creation
+            logger.warning("[ResourceWorld] Disk worlds found but not loaded — recreating");
+            plugin.getConfig().set(CFG_SEED, null);
+            plugin.saveConfig();
+            createResourceWorldsAsync(() -> {
+                updateNextRefresh();
+                plugin.saveConfig();
+            });
         }
     }
 
@@ -300,12 +360,15 @@ public class ResourceWorldManager implements AutoCloseable {
                     createOneWorld(MAIN_KEY, owDim, seed)
                         .thenAccept(ow -> {
                             resourceWorld = ow;
+                            applyResourceGamerules(ow);
                             (nether ? createOneWorld(NETHER_KEY, nDim, seed) : CompletableFuture.<World>completedFuture(null))
                                 .thenAccept(nw -> {
                                     resourceNether = nw;
+                                    if (nw != null) applyResourceGamerules(nw);
                                     (end ? createOneWorld(END_KEY, eDim, seed) : CompletableFuture.<World>completedFuture(null))
                                         .thenAccept(ew -> {
                                             resourceEnd = ew;
+                                            if (ew != null) applyResourceGamerules(ew);
                                             Bukkit.getGlobalRegionScheduler().run(plugin, t3 -> {
                                                 broadcastRefresh("§a[资源世界] 资源世界刷新完毕！使用 /los resource 进入。");
                                                 updateNextRefresh();

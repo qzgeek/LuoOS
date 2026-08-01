@@ -77,7 +77,6 @@ public final class HeosFoliaPlugin extends JavaPlugin {
         FoliaMigrationCommands migrationCommands = new FoliaMigrationCommands(this, storage, banData, nameResolver);
         FoliaBindUI bindUI = new FoliaBindUI(storage, this);
         getServer().getPluginManager().registerEvents(bindUI, this);
-        getServer().getPluginManager().registerEvents(new heos.folia.event.PasswordMaskListener(), this);
         FoliaBindCommands bindCommands = new FoliaBindCommands(accountBinding, storage, bindUI);
 
         // Player stats tracker

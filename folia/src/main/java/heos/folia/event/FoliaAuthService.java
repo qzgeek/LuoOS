@@ -229,22 +229,29 @@ public final class FoliaAuthService {
             player.sendMessage(ChatColor.RED + FoliaMessages.alreadyRegistered());
             return;
         }
-        if (!password.equals(confirmPassword)) {
+        // Normalize: strip zero-width / invisible Unicode characters that
+        // Minecraft clients or chat parsers may inject, then trim whitespace.
+        String p1 = stripInvisible(password);
+        String p2 = stripInvisible(confirmPassword);
+        if (!p1.equals(p2)) {
             player.sendMessage(ChatColor.RED + FoliaMessages.passwordMismatch());
+            // Log diagnostic info: lengths and first differing char for debugging
+            plugin.getLogger().warning("[Auth] Password mismatch for " + player.getName()
+                    + " — len1=" + p1.length() + " len2=" + p2.length());
             return;
         }
         int min = plugin.getConfig().getInt("minPasswordLength", 4);
         int max = plugin.getConfig().getInt("maxPasswordLength", 32);
-        if (password.length() < min) {
+        if (p1.length() < min) {
             player.sendMessage(ChatColor.RED + FoliaMessages.passwordTooShort().formatted(min));
             return;
         }
-        if (password.length() > max) {
+        if (p1.length() > max) {
             player.sendMessage(ChatColor.RED + FoliaMessages.passwordTooLong().formatted(max));
             return;
         }
         data.uuid = player.getUniqueId();
-        data.passwordHash = FoliaPasswordHasher.hashPassword(password);
+        data.passwordHash = FoliaPasswordHasher.hashPassword(p1);
         data.lastIp = ip(player);
         long now = System.currentTimeMillis();
         data.registeredTime = now;
@@ -428,6 +435,15 @@ public final class FoliaAuthService {
 
     private static String ip(Player player) {
         return FoliaPlayerAccess.ip(player);
+    }
+
+    /** Strip zero-width and invisible Unicode characters that clients may inject. */
+    private static String stripInvisible(String s) {
+        if (s == null) return "";
+        // Remove: zero-width space (U+200B), zero-width non-joiner (U+200C),
+        // zero-width joiner (U+200D), byte-order mark (U+FEFF),
+        // and other common invisible codepoints, then trim.
+        return s.replaceAll("[\\u200B\\u200C\\u200D\\uFEFF\\u00AD\\u2060]", "").trim();
     }
 
     private static final class Session {

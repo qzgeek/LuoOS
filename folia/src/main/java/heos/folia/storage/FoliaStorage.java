@@ -20,6 +20,9 @@ import java.util.Base64;
 import java.util.List;
 import java.util.Locale;
 import java.util.UUID;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 import java.util.logging.Logger;
 
 /**
@@ -47,6 +50,13 @@ public final class FoliaStorage {
     private String mysqlUrl;
     private String mysqlUser;
     private String mysqlPass;
+
+    /** Single-threaded writer to offload SQLite writes from Folia region threads. */
+    private final ExecutorService writer = Executors.newSingleThreadExecutor(r -> {
+        Thread t = new Thread(r, "LuoOS-DB-Writer");
+        t.setDaemon(true);
+        return t;
+    });
 
     public FoliaStorage(Path root) {
         this.root = root;
@@ -193,12 +203,18 @@ public final class FoliaStorage {
         return results;
     }
 
-    public synchronized void save(FoliaPlayerData data) {
-        initialize();
-        if (data.uuid == null) {
+    public void save(FoliaPlayerData data) {
+        if (data == null || data.uuid == null) {
             LOGGER.warning("Cannot save player data with null UUID");
             return;
         }
+        // Offload to dedicated writer thread — NEVER block a Folia region thread on SQLite I/O.
+        final FoliaPlayerData copy = data;
+        writer.execute(() -> saveSync(copy));
+    }
+
+    private synchronized void saveSync(FoliaPlayerData data) {
+        initialize();
         try (PreparedStatement ps = connection.prepareStatement(
                 "INSERT INTO " + TABLE + " (uuid, username, username_lower, last_ip, data) VALUES (?,?,?,?,?) "
                         + (useMySQL
@@ -504,6 +520,16 @@ public final class FoliaStorage {
     }
 
     public synchronized void close() {
+        writer.shutdown();
+        try {
+            if (!writer.awaitTermination(30, TimeUnit.SECONDS)) {
+                LOGGER.warning("DB writer did not terminate in time — forcing shutdown");
+                writer.shutdownNow();
+            }
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            writer.shutdownNow();
+        }
         if (connection == null) return;
         try { connection.close(); } catch (Exception ignored) {}
         connection = null;
