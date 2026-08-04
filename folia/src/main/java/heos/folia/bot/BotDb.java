@@ -11,6 +11,14 @@ import java.util.logging.Logger;
 /**
  * QQ whitelist/blacklist operations using the shared LuoOS database.
  * Whitelist entries also serve as QQ-MC account bindings.
+ *
+ * THREAD SAFETY: every SQL block is wrapped in {@code synchronized (storage)}.
+ * FoliaStorage hands out its single SQLite connection via getConnection(), and
+ * its own writer thread (LuoOS-DB-Writer) uses the SAME connection. Without
+ * holding the storage monitor around the whole statement, the WebSocket worker
+ * thread and the writer thread hit SQLITE_BUSY_SNAPSHOT ("database is locked")
+ * — the INSERT silently fails while executeUpdate() swallows nothing. Never
+ * touch the connection outside synchronized (storage).
  */
 public class BotDb {
     private final Logger logger;
@@ -32,12 +40,14 @@ public class BotDb {
     public List<String> getWhitelist(long qq) {
         List<String> players = new ArrayList<>();
         try {
-            var conn = storage.getConnection();
-            PreparedStatement ps = conn.prepareStatement(
-                    "SELECT player_name FROM qq_whitelist WHERE qq = ?");
-            ps.setLong(1, qq);
-            ResultSet rs = ps.executeQuery();
-            while (rs.next()) players.add(rs.getString("player_name"));
+            synchronized (storage) {
+                var conn = storage.getConnection();
+                PreparedStatement ps = conn.prepareStatement(
+                        "SELECT player_name FROM qq_whitelist WHERE qq = ?");
+                ps.setLong(1, qq);
+                ResultSet rs = ps.executeQuery();
+                while (rs.next()) players.add(rs.getString("player_name"));
+            }
         } catch (Exception e) {
             logger.warning("[BotDb] getWhitelist: " + e.getMessage());
         }
@@ -46,11 +56,13 @@ public class BotDb {
 
     public int getWhitelistCount(long qq) {
         try {
-            var conn = storage.getConnection();
-            PreparedStatement ps = conn.prepareStatement("SELECT COUNT(*) FROM qq_whitelist WHERE qq = ?");
-            ps.setLong(1, qq);
-            ResultSet rs = ps.executeQuery();
-            if (rs.next()) return rs.getInt(1);
+            synchronized (storage) {
+                var conn = storage.getConnection();
+                PreparedStatement ps = conn.prepareStatement("SELECT COUNT(*) FROM qq_whitelist WHERE qq = ?");
+                ps.setLong(1, qq);
+                ResultSet rs = ps.executeQuery();
+                if (rs.next()) return rs.getInt(1);
+            }
         } catch (Exception e) {
             logger.warning("[BotDb] count: " + e.getMessage());
         }
@@ -59,13 +71,15 @@ public class BotDb {
 
     public boolean hasWhitelist(long qq, String playerName) {
         try {
-            var conn = storage.getConnection();
-            PreparedStatement ps = conn.prepareStatement(
-                    "SELECT 1 FROM qq_whitelist WHERE qq = ? AND player_name = ?");
-            ps.setLong(1, qq);
-            ps.setString(2, playerName);
-            ResultSet rs = ps.executeQuery();
-            return rs.next();
+            synchronized (storage) {
+                var conn = storage.getConnection();
+                PreparedStatement ps = conn.prepareStatement(
+                        "SELECT 1 FROM qq_whitelist WHERE qq = ? AND player_name = ?");
+                ps.setLong(1, qq);
+                ps.setString(2, playerName);
+                ResultSet rs = ps.executeQuery();
+                return rs.next();
+            }
         } catch (Exception e) {
             return false;
         }
@@ -73,16 +87,18 @@ public class BotDb {
 
     public void addWhitelist(long qq, String playerName, String playerUuid) {
         try {
-            var conn = storage.getConnection();
-            String sql = storage.isMySQL()
-                    ? "INSERT IGNORE INTO qq_whitelist (qq, player_name, player_uuid, added_at) VALUES (?, ?, ?, ?)"
-                    : "INSERT OR IGNORE INTO qq_whitelist (qq, player_name, player_uuid, added_at) VALUES (?, ?, ?, ?)";
-            PreparedStatement ps = conn.prepareStatement(sql);
-            ps.setLong(1, qq);
-            ps.setString(2, playerName);
-            ps.setString(3, playerUuid);
-            ps.setLong(4, System.currentTimeMillis());
-            ps.executeUpdate();
+            synchronized (storage) {
+                var conn = storage.getConnection();
+                String sql = storage.isMySQL()
+                        ? "INSERT IGNORE INTO qq_whitelist (qq, player_name, player_uuid, added_at) VALUES (?, ?, ?, ?)"
+                        : "INSERT OR IGNORE INTO qq_whitelist (qq, player_name, player_uuid, added_at) VALUES (?, ?, ?, ?)";
+                PreparedStatement ps = conn.prepareStatement(sql);
+                ps.setLong(1, qq);
+                ps.setString(2, playerName);
+                ps.setString(3, playerUuid);
+                ps.setLong(4, System.currentTimeMillis());
+                ps.executeUpdate();
+            }
         } catch (Exception e) {
             logger.warning("[BotDb] addWhitelist: " + e.getMessage());
         }
@@ -90,12 +106,14 @@ public class BotDb {
 
     public void removeWhitelist(long qq, String playerName) {
         try {
-            var conn = storage.getConnection();
-            PreparedStatement ps = conn.prepareStatement(
-                    "DELETE FROM qq_whitelist WHERE qq = ? AND player_name = ?");
-            ps.setLong(1, qq);
-            ps.setString(2, playerName);
-            ps.executeUpdate();
+            synchronized (storage) {
+                var conn = storage.getConnection();
+                PreparedStatement ps = conn.prepareStatement(
+                        "DELETE FROM qq_whitelist WHERE qq = ? AND player_name = ?");
+                ps.setLong(1, qq);
+                ps.setString(2, playerName);
+                ps.executeUpdate();
+            }
         } catch (Exception e) {
             logger.warning("[BotDb] removeWhitelist: " + e.getMessage());
         }
@@ -120,15 +138,17 @@ public class BotDb {
     public List<WhitelistEntry> getWhitelistEntries(long qq) {
         List<WhitelistEntry> entries = new ArrayList<>();
         try {
-            var conn = storage.getConnection();
-            PreparedStatement ps = conn.prepareStatement(
-                    "SELECT player_name, player_uuid, frozen FROM qq_whitelist WHERE qq = ? ORDER BY added_at");
-            ps.setLong(1, qq);
-            ResultSet rs = ps.executeQuery();
-            while (rs.next()) {
-                boolean frozen = false;
-                try { frozen = rs.getInt("frozen") == 1; } catch (Exception ignored) {}
-                entries.add(new WhitelistEntry(rs.getString("player_name"), rs.getString("player_uuid"), frozen));
+            synchronized (storage) {
+                var conn = storage.getConnection();
+                PreparedStatement ps = conn.prepareStatement(
+                        "SELECT player_name, player_uuid, frozen FROM qq_whitelist WHERE qq = ? ORDER BY added_at");
+                ps.setLong(1, qq);
+                ResultSet rs = ps.executeQuery();
+                while (rs.next()) {
+                    boolean frozen = false;
+                    try { frozen = rs.getInt("frozen") == 1; } catch (Exception ignored) {}
+                    entries.add(new WhitelistEntry(rs.getString("player_name"), rs.getString("player_uuid"), frozen));
+                }
             }
         } catch (Exception e) {
             logger.warning("[BotDb] getWhitelistEntries: " + e.getMessage());
@@ -139,11 +159,13 @@ public class BotDb {
     /** Mark all whitelist entries of a QQ as frozen. Returns number of entries affected. */
     public int freezeWhitelist(long qq) {
         try {
-            var conn = storage.getConnection();
-            PreparedStatement ps = conn.prepareStatement(
-                    "UPDATE qq_whitelist SET frozen = 1 WHERE qq = ?");
-            ps.setLong(1, qq);
-            return ps.executeUpdate();
+            synchronized (storage) {
+                var conn = storage.getConnection();
+                PreparedStatement ps = conn.prepareStatement(
+                        "UPDATE qq_whitelist SET frozen = 1 WHERE qq = ?");
+                ps.setLong(1, qq);
+                return ps.executeUpdate();
+            }
         } catch (Exception e) {
             logger.warning("[BotDb] freezeWhitelist: " + e.getMessage());
         }
@@ -153,11 +175,13 @@ public class BotDb {
     /** Clear the frozen flag for all whitelist entries of a QQ. Returns number of entries affected. */
     public int unfreezeWhitelist(long qq) {
         try {
-            var conn = storage.getConnection();
-            PreparedStatement ps = conn.prepareStatement(
-                    "UPDATE qq_whitelist SET frozen = 0 WHERE qq = ?");
-            ps.setLong(1, qq);
-            return ps.executeUpdate();
+            synchronized (storage) {
+                var conn = storage.getConnection();
+                PreparedStatement ps = conn.prepareStatement(
+                        "UPDATE qq_whitelist SET frozen = 0 WHERE qq = ?");
+                ps.setLong(1, qq);
+                return ps.executeUpdate();
+            }
         } catch (Exception e) {
             logger.warning("[BotDb] unfreezeWhitelist: " + e.getMessage());
         }
@@ -168,15 +192,17 @@ public class BotDb {
 
     public boolean isBlacklisted(long qq) {
         try {
-            var conn = storage.getConnection();
-            PreparedStatement ps = conn.prepareStatement(
-                    "SELECT expiry FROM qq_blacklist WHERE qq = ?");
-            ps.setLong(1, qq);
-            ResultSet rs = ps.executeQuery();
-            if (rs.next()) {
-                long expiry = rs.getLong("expiry");
-                if (rs.wasNull()) return true; // permanent
-                return expiry > System.currentTimeMillis();
+            synchronized (storage) {
+                var conn = storage.getConnection();
+                PreparedStatement ps = conn.prepareStatement(
+                        "SELECT expiry FROM qq_blacklist WHERE qq = ?");
+                ps.setLong(1, qq);
+                ResultSet rs = ps.executeQuery();
+                if (rs.next()) {
+                    long expiry = rs.getLong("expiry");
+                    if (rs.wasNull()) return true; // permanent
+                    return expiry > System.currentTimeMillis();
+                }
             }
         } catch (Exception e) {}
         return false;
@@ -184,16 +210,18 @@ public class BotDb {
 
     public void blacklist(long qq, Long durationSeconds, String reason) {
         try {
-            var conn = storage.getConnection();
-            Long expiry = durationSeconds != null ? System.currentTimeMillis() + durationSeconds * 1000 : null;
-            PreparedStatement ps = conn.prepareStatement(
-                    "INSERT OR REPLACE INTO qq_blacklist (qq, reason, banned_at, expiry) VALUES (?, ?, ?, ?)");
-            ps.setLong(1, qq);
-            ps.setString(2, reason);
-            ps.setLong(3, System.currentTimeMillis());
-            if (expiry != null) ps.setLong(4, expiry);
-            else ps.setNull(4, java.sql.Types.BIGINT);
-            ps.executeUpdate();
+            synchronized (storage) {
+                var conn = storage.getConnection();
+                Long expiry = durationSeconds != null ? System.currentTimeMillis() + durationSeconds * 1000 : null;
+                PreparedStatement ps = conn.prepareStatement(
+                        "INSERT OR REPLACE INTO qq_blacklist (qq, reason, banned_at, expiry) VALUES (?, ?, ?, ?)");
+                ps.setLong(1, qq);
+                ps.setString(2, reason);
+                ps.setLong(3, System.currentTimeMillis());
+                if (expiry != null) ps.setLong(4, expiry);
+                else ps.setNull(4, java.sql.Types.BIGINT);
+                ps.executeUpdate();
+            }
         } catch (Exception e) {
             logger.warning("[BotDb] blacklist: " + e.getMessage());
         }
@@ -201,12 +229,12 @@ public class BotDb {
 
     public void unblacklist(long qq) {
         try {
-            var conn = storage.getConnection();
-            conn.prepareStatement("DELETE FROM qq_blacklist WHERE qq = ?").executeUpdate();
-            // Need to set the parameter... let me fix
-            PreparedStatement ps = conn.prepareStatement("DELETE FROM qq_blacklist WHERE qq = ?");
-            ps.setLong(1, qq);
-            ps.executeUpdate();
+            synchronized (storage) {
+                var conn = storage.getConnection();
+                PreparedStatement ps = conn.prepareStatement("DELETE FROM qq_blacklist WHERE qq = ?");
+                ps.setLong(1, qq);
+                ps.executeUpdate();
+            }
         } catch (Exception e) {
             logger.warning("[BotDb] unblacklist: " + e.getMessage());
         }
