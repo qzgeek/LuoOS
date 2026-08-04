@@ -19,8 +19,11 @@ public class OneBotEvent {
     // ---- Accessors ----
     public String postType() { return str("post_type"); }
     public String messageType() { return str("message_type"); }
+    public String noticeType() { return str("notice_type"); }
+    public String subType() { return str("sub_type"); }
     public long groupId() { return raw.has("group_id") ? raw.get("group_id").getAsLong() : 0; }
     public long userId() { return raw.has("user_id") ? raw.get("user_id").getAsLong() : 0; }
+    public long operatorId() { return raw.has("operator_id") ? raw.get("operator_id").getAsLong() : 0; }
     public long messageId() { return raw.has("message_id") ? raw.get("message_id").getAsLong() : 0; }
     public String rawMessage() { return str("raw_message"); }
     public JsonObject sender() { return raw.has("sender") ? raw.getAsJsonObject("sender") : null; }
@@ -61,6 +64,44 @@ public class OneBotEvent {
             callApi("send_group_msg", "{\"group_id\":" + groupId()
                     + ",\"message\":[{\"type\":\"image\",\"data\":{\"file\":\"" + escape(file) + "\"}}]}");
         }
+    }
+
+    /** Send a plain text message to a group (works for notice events too, not just messages). */
+    public void sendGroupMessage(long groupId, String message) {
+        callApi("send_group_msg", "{\"group_id\":" + groupId
+                + ",\"message\":[{\"type\":\"text\",\"data\":{\"text\":\"" + escape(message) + "\"}}]}");
+    }
+
+    /** Send a private message to an arbitrary QQ and report whether it was accepted (retcode == 0). */
+    public boolean sendPrivateChecked(long targetQq, String message) {
+        try {
+            JsonObject resp = callApiAsync("send_private_msg",
+                    "{\"user_id\":" + targetQq
+                            + ",\"message\":[{\"type\":\"text\",\"data\":{\"text\":\"" + escape(message) + "\"}}]}")
+                    .get(8, TimeUnit.SECONDS);
+            if (resp == null) return false;
+            return resp.has("status") && "ok".equals(resp.get("status").getAsString())
+                    && resp.has("retcode") && resp.get("retcode").getAsInt() == 0;
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
+    /**
+     * Send a private message asynchronously and invoke the callback with the result.
+     * CRITICAL: never block the WebSocket worker thread waiting for an API response —
+     * the worker that dispatched the request is also the one that must process the
+     * reply, so a synchronous get() deadlocks until the 10s timeout.
+     */
+    public void sendPrivateThen(long targetQq, String message, java.util.function.Consumer<Boolean> callback) {
+        callApiAsync("send_private_msg",
+                "{\"user_id\":" + targetQq
+                        + ",\"message\":[{\"type\":\"text\",\"data\":{\"text\":\"" + escape(message) + "\"}}]}")
+                .thenAccept(resp -> {
+                    boolean ok = resp != null && resp.has("status") && "ok".equals(resp.get("status").getAsString())
+                            && resp.has("retcode") && resp.get("retcode").getAsInt() == 0;
+                    callback.accept(ok);
+                });
     }
 
     public void react(boolean success) {

@@ -143,6 +143,7 @@ public final class FoliaStorage {
                     + "player_name VARCHAR(64) NOT NULL,"
                     + "player_uuid VARCHAR(36),"
                     + "added_at BIGINT NOT NULL,"
+                    + "frozen INTEGER DEFAULT 0,"
                     + "PRIMARY KEY (qq, player_name)"
                     + ");");
             s.executeUpdate("CREATE INDEX IF NOT EXISTS idx_qq_whitelist_uuid ON qq_whitelist(player_uuid);");
@@ -153,6 +154,13 @@ public final class FoliaStorage {
                     + "banned_at BIGINT NOT NULL,"
                     + "expiry BIGINT"
                     + ");");
+
+            // Compat: older DBs lack the frozen column (退群/踢群白名单冻结标记)
+            try {
+                s.executeUpdate("ALTER TABLE qq_whitelist ADD COLUMN frozen INTEGER DEFAULT 0");
+            } catch (Exception ignored) {
+                // Column already exists — fine
+            }
         }
     }
 

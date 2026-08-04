@@ -1,5 +1,6 @@
 package heos.folia.bot;
 
+import heos.folia.storage.FoliaPlayerData;
 import heos.folia.storage.FoliaStorage;
 
 import java.util.*;
@@ -55,11 +56,20 @@ public class BotCommandHandler {
     private static final Pattern STATUS = Pattern.compile("^(服务器还活着吗|服务器状态)$");
     private static final Pattern BAN_CMD = Pattern.compile("^(封禁|ban)\\s*(.*)$", Pattern.CASE_INSENSITIVE);
     private static final Pattern UNBAN_CMD = Pattern.compile("^(解封|unban)\\s*(.*)$", Pattern.CASE_INSENSITIVE);
-    private static final Pattern BAN_LIST = Pattern.compile("^(封禁列表|查看封禁列表|banlist)$", Pattern.CASE_INSENSITIVE);
+    private static final Pattern BAN_LIST = Pattern.compile("^(封禁列表|查看封禁列表|banlist|封神榜)$", Pattern.CASE_INSENSITIVE);
     // Admin delete: 删除 @QQ [ID]
     private static final Pattern ADMIN_DELETE = Pattern.compile("^删除\\s+(.+)$");
     // Bot list: 看看人机
     private static final Pattern BOT_LIST = Pattern.compile("^(看看人机|在线人机|人机列表)$");
+    // Reset password via QQ private message: 重置密码 <账号名>
+    private static final Pattern RESET_PASSWORD = Pattern.compile("^(重置密码)\\s+(\\S+)$");
+
+    // Per-QQ cooldown for password resets (anti-abuse)
+    private final Map<Long, Long> lastResetPassword = new ConcurrentHashMap<>();
+    private static final long RESET_PASSWORD_COOLDOWN_MS = 60_000L;
+
+    // Password chars without confusables (0/O, 1/l/I)
+    private static final String PASSWORD_CHARS = "abcdefghjkmnpqrstuvwxyzABCDEFGHJKMNPQRSTUVWXYZ23456789";
 
     // Deny emoji
     private static final int EMOJI_DENY = 15;
@@ -108,6 +118,11 @@ public class BotCommandHandler {
     }
 
     public void handle(OneBotEvent event) {
+        // Notice events (群成员退群/被踢/进群) — whitelist freeze & restore
+        if ("notice".equals(event.postType())) {
+            handleNotice(event);
+            return;
+        }
         if (!"message".equals(event.postType()) || !"group".equals(event.messageType())) return;
 
         long groupId = event.groupId();
@@ -131,6 +146,7 @@ public class BotCommandHandler {
         boolean isCommand = STATUS.matcher(text).matches() || HELP.matcher(text).matches()
                 || BOT_LIST.matcher(text).matches()
                 || APPLY.matcher(text).matches() || DELETE.matcher(text).matches()
+                || RESET_PASSWORD.matcher(text).matches()
                 || QUERY_SIMPLE.matcher(text).matches() || QUERY_ARGS.matcher(text).matches();
         if (isCommand || isAdmin) {
             delayReply();
@@ -181,6 +197,10 @@ public class BotCommandHandler {
         m = DELETE.matcher(text);
         if (m.matches()) { handleSelfDelete(qq, m.group(2), event); return; }
 
+        // Reset password (QQ must own the account; new password via private message)
+        m = RESET_PASSWORD.matcher(text);
+        if (m.matches()) { handleResetPassword(qq, m.group(2).trim(), event); return; }
+
         // Query (with or without args)
         m = QUERY_ARGS.matcher(text);
         if (m.matches()) { handleQuery(qq, m.group(2).trim(), event); return; }
@@ -192,6 +212,90 @@ public class BotCommandHandler {
                 || text.startsWith("查看") || text.startsWith("封禁") || text.startsWith("解封")
                 || text.startsWith("服务器") || text.startsWith("help") || text.startsWith("HELP"))) {
             logger.info("[BotHandler] Unknown command: " + text);
+        }
+    }
+
+    // ======================== Notice events (退群/被踢 → 冻结白名单) ========================
+
+    /**
+     * Handle group member count changes:
+     *   group_decrease (sub_type: leave/kick) → freeze the member's whitelist
+     *   group_increase                       → restore the member's whitelist
+     */
+    private void handleNotice(OneBotEvent event) {
+        long groupId = event.groupId();
+        if (!isAllowed(groupId)) return;
+        String noticeType = event.noticeType();
+        long targetQq = event.userId();
+        String subType = event.subType();
+
+        if ("group_decrease".equals(noticeType)) {
+            // kick_me = the bot itself was removed — ignore
+            if ("kick_me".equals(subType)) return;
+            freezeQqWhitelist(targetQq, groupId, event);
+        } else if ("group_increase".equals(noticeType)) {
+            restoreQqWhitelist(targetQq, groupId, event);
+        }
+    }
+
+    /** Drop all whitelist entries of a QQ from the server whitelist and mark them frozen. */
+    private void freezeQqWhitelist(long qq, long groupId, OneBotEvent event) {
+        try {
+            List<BotDb.WhitelistEntry> entries = botDb.getWhitelistEntries(qq);
+            if (entries.isEmpty()) return;
+            org.bukkit.Bukkit.getGlobalRegionScheduler().run(
+                    org.bukkit.Bukkit.getPluginManager().getPlugin("luoos"),
+                    task -> {
+                        for (BotDb.WhitelistEntry e : entries) {
+                            try {
+                                org.bukkit.OfflinePlayer op = org.bukkit.Bukkit.getOfflinePlayer(e.playerName);
+                                if (op != null) op.setWhitelisted(false);
+                            } catch (Exception ex) {
+                                logger.warning("[BotHandler] freeze unwhitelist failed for " + e.playerName + ": " + ex.getMessage());
+                            }
+                        }
+                        // Kick any online players under this QQ — frozen means not allowed to play
+                        for (var p : org.bukkit.Bukkit.getOnlinePlayers()) {
+                            for (BotDb.WhitelistEntry e : entries) {
+                                if (e.playerName.equalsIgnoreCase(p.getName())) {
+                                    p.kickPlayer("你已退出QQ群，白名单已被冻结，重新进群后自动恢复。");
+                                    break;
+                                }
+                            }
+                        }
+                    });
+            int n = botDb.freezeWhitelist(qq);
+            logger.info("[BotHandler] QQ" + qq + " left/kicked from group " + groupId + " — frozen " + n + " whitelist entries");
+            event.sendGroupMessage(groupId, "QQ" + qq + " 已退群/被移出群，其名下 " + n + " 个白名单账号已冻结，重新进群后自动恢复。");
+        } catch (Exception e) {
+            logger.warning("[BotHandler] freeze failed for QQ" + qq + ": " + e.getMessage());
+        }
+    }
+
+    /** Restore frozen whitelist entries of a QQ when it rejoins the group. */
+    private void restoreQqWhitelist(long qq, long groupId, OneBotEvent event) {
+        try {
+            List<BotDb.WhitelistEntry> entries = botDb.getWhitelistEntries(qq);
+            List<BotDb.WhitelistEntry> frozen = new ArrayList<>();
+            for (BotDb.WhitelistEntry e : entries) if (e.frozen) frozen.add(e);
+            if (frozen.isEmpty()) return;
+            int n = botDb.unfreezeWhitelist(qq);
+            org.bukkit.Bukkit.getGlobalRegionScheduler().run(
+                    org.bukkit.Bukkit.getPluginManager().getPlugin("luoos"),
+                    task -> {
+                        for (BotDb.WhitelistEntry e : frozen) {
+                            try {
+                                org.bukkit.OfflinePlayer op = org.bukkit.Bukkit.getOfflinePlayer(e.playerName);
+                                if (op != null) op.setWhitelisted(true);
+                            } catch (Exception ex) {
+                                logger.warning("[BotHandler] restore whitelist failed for " + e.playerName + ": " + ex.getMessage());
+                            }
+                        }
+                    });
+            logger.info("[BotHandler] QQ" + qq + " rejoined group " + groupId + " — restored " + n + " whitelist entries");
+            event.sendGroupMessage(groupId, "QQ" + qq + " 已重新进群，其名下 " + n + " 个白名单账号已恢复。");
+        } catch (Exception e) {
+            logger.warning("[BotHandler] restore failed for QQ" + qq + ": " + e.getMessage());
         }
     }
 
@@ -245,14 +349,15 @@ public class BotCommandHandler {
             + "申请白名单/白名单/添加白名单 <ID>  申请白名单\n"
             + "删除白名单/移除白名单 <ID>        删除自己的白名单\n"
             + "查询白名单/查询/查看 [name/QQ]    查看白名单\n"
+            + "重置密码 <账号名>                 重置名下账号密码(新密码私聊发送)\n"
             + "服务器还活着吗/服务器状态         查看服务器状态\n"
             + "help/帮助/菜单                    显示此帮助\n\n"
             + "——管理员——\n"
             + "封禁/ban @QQ [时长]              封禁用户\n"
             + "解封/unban @QQ                   解禁用户\n"
             + "删除 @QQ <ID>                    删除指定用户的白名单\n"
-            + "封禁列表/查看封禁列表             查看封禁列表\n\n"
-            + "Write by 黔中极客 / LuoOS Bot v0.06";
+            + "封禁列表/查看封禁列表/封神榜     查看封禁列表\n\n"
+            + "Write by 黔中极客 / LuoOS Bot v0.09";
         event.reply(txt);
         event.react(true);
     }
@@ -331,7 +436,94 @@ public class BotCommandHandler {
         event.react(true);
     }
 
-    // ======================== Query (self / other / reverse) ========================
+    // ======================== Password reset via QQ ========================
+
+    /**
+     * 重置密码 <账号名> — the QQ must own the account (qq_whitelist binding).
+     * Generates a random password, updates the stored hash, and sends the new
+     * password to the player via QQ private message. If the private message
+     * cannot be delivered, the change is rolled back so the player is never
+     * locked out with a password they didn't receive.
+     */
+    private void handleResetPassword(long qq, String accountName, OneBotEvent event) {
+        if (botDb.isBlacklisted(qq)) { event.reactDeny(); return; }
+        if (!idPattern.matcher(accountName).matches()) { event.react(false); return; }
+
+        // Per-QQ cooldown to prevent abuse
+        long now = System.currentTimeMillis();
+        Long last = lastResetPassword.get(qq);
+        if (last != null && now - last < RESET_PASSWORD_COOLDOWN_MS) {
+            event.reactDeny();
+            return;
+        }
+
+        // Verify the QQ actually owns this account (case-insensitive)
+        String ownedName = findOwnedAccountName(qq, accountName);
+        if (ownedName == null) {
+            logger.info("[BotHandler] reset-password denied: QQ" + qq + " does not own '" + accountName + "'");
+            event.react(false);
+            return;
+        }
+
+        var data = storage.load(ownedName);
+        if (data == null || !data.isRegistered()) {
+            logger.info("[BotHandler] reset-password: account '" + ownedName + "' not registered");
+            event.react(false);
+            return;
+        }
+
+        lastResetPassword.put(qq, now);
+
+        String oldHash = data.passwordHash;
+        // 6-char password: letters + digits only
+        String newPassword = generatePassword(6);
+        data.passwordHash = heos.folia.utils.FoliaPasswordHasher.hashPassword(newPassword);
+        storage.save(data);
+
+        String msg = "你的 LuoOS 账号 [" + data.effectiveDisplayName() + "] 密码已重置。\n"
+                + "新密码: " + newPassword + "\n"
+                + "请在游戏内使用 /login 登录，登录后请尽快用 /changepassword 修改密码。";
+        final FoliaPlayerData savedData = data;
+        event.sendPrivateThen(qq, msg, sent -> {
+            if (sent) {
+                logger.info("[BotHandler] QQ" + qq + " reset password for '" + ownedName + "' (sent via private msg)");
+                event.replyAt("账号 [" + savedData.effectiveDisplayName() + "] 密码已重置，新密码已通过私聊发送，请查收。");
+                event.react(true);
+            } else {
+                // Roll back — never leave the player locked out with an undelivered password
+                savedData.passwordHash = oldHash;
+                storage.save(savedData);
+                logger.warning("[BotHandler] reset-password: private msg to QQ" + qq + " FAILED — rolled back");
+                event.replyAt("重置失败：无法向你的QQ发送私聊消息，请检查是否开启了「允许陌生人私聊」。");
+                event.react(false);
+            }
+        });
+    }
+
+    /** Case-insensitive lookup of the exact stored account name owned by this QQ. */
+    private String findOwnedAccountName(long qq, String accountName) {
+        try {
+            var conn = storage.getConnection();
+            var ps = conn.prepareStatement(
+                    "SELECT player_name FROM qq_whitelist WHERE qq = ? AND LOWER(player_name) = LOWER(?)");
+            ps.setLong(1, qq);
+            ps.setString(2, accountName);
+            var rs = ps.executeQuery();
+            if (rs.next()) return rs.getString("player_name");
+        } catch (Exception e) {
+            logger.warning("[BotHandler] findOwnedAccountName failed: " + e.getMessage());
+        }
+        return null;
+    }
+
+    /** Random password from unambiguous chars (no 0/O, 1/l/I). */
+    private String generatePassword(int length) {
+        StringBuilder sb = new StringBuilder(length);
+        for (int i = 0; i < length; i++) {
+            sb.append(PASSWORD_CHARS.charAt(random.nextInt(PASSWORD_CHARS.length())));
+        }
+        return sb.toString();
+    }
 
     /**
      * query(null)  = show own whitelist
@@ -395,14 +587,18 @@ public class BotCommandHandler {
     }
 
     private void showWhitelist(long targetQq, String label, OneBotEvent event) {
-        var players = botDb.getWhitelist(targetQq);
-        int count = players.size();
-        if (players.isEmpty()) {
+        var entries = botDb.getWhitelistEntries(targetQq);
+        int count = entries.size();
+        if (entries.isEmpty()) {
             event.replyAt(label + "还没有添加白名单 (0/" + maxPerQq + ")");
         } else {
             StringBuilder sb = new StringBuilder(label + "的白名单 (" + count + "/" + maxPerQq + "):\n");
-            for (int i = 0; i < players.size(); i++)
-                sb.append(i + 1).append(". ").append(players.get(i)).append("\n");
+            for (int i = 0; i < entries.size(); i++) {
+                BotDb.WhitelistEntry e = entries.get(i);
+                sb.append(i + 1).append(". ").append(e.playerName);
+                if (e.frozen) sb.append(" (已冻结)");
+                sb.append("\n");
+            }
             event.replyAt(sb.toString());
         }
         event.react(true);
