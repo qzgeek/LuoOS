@@ -504,13 +504,14 @@ public class BotCommandHandler {
     private String findOwnedAccountName(long qq, String accountName) {
         try {
             synchronized (storage) {
-                var conn = storage.getConnection();
-                var ps = conn.prepareStatement(
-                        "SELECT player_name FROM qq_whitelist WHERE qq = ? AND LOWER(player_name) = LOWER(?)");
-                ps.setLong(1, qq);
-                ps.setString(2, accountName);
-                var rs = ps.executeQuery();
-                if (rs.next()) return rs.getString("player_name");
+                try (var ps = storage.getConnection().prepareStatement(
+                        "SELECT player_name FROM qq_whitelist WHERE qq = ? AND LOWER(player_name) = LOWER(?)")) {
+                    ps.setLong(1, qq);
+                    ps.setString(2, accountName);
+                    try (var rs = ps.executeQuery()) {
+                        if (rs.next()) return rs.getString("player_name");
+                    }
+                }
             }
         } catch (Exception e) {
             logger.warning("[BotHandler] findOwnedAccountName failed: " + e.getMessage());
@@ -566,20 +567,21 @@ public class BotCommandHandler {
         // Reverse lookup: find QQ(s) that own this game ID
         try {
             synchronized (storage) {
-                var conn = storage.getConnection();
-                var ps = conn.prepareStatement("SELECT qq, player_uuid FROM qq_whitelist WHERE LOWER(player_name) = ?");
-                ps.setString(1, name.toLowerCase());
-                var rs = ps.executeQuery();
-                List<String> found = new ArrayList<>();
-                while (rs.next()) {
-                    long ownerQq = rs.getLong("qq");
-                    String uid = rs.getString("player_uuid");
-                    found.add("QQ" + ownerQq + (uid != null && !uid.isEmpty() ? " (UUID:" + uid.substring(0, 8) + "...)" : ""));
-                }
-                if (found.isEmpty()) {
-                    event.replyAt("未找到 " + name + " 的白名单记录");
-                } else {
-                    event.replyAt("游戏ID " + name + " 的绑定信息:\n" + String.join("\n", found));
+                try (var ps = storage.getConnection().prepareStatement("SELECT qq, player_uuid FROM qq_whitelist WHERE LOWER(player_name) = ?")) {
+                    ps.setString(1, name.toLowerCase());
+                    try (var rs = ps.executeQuery()) {
+                        List<String> found = new ArrayList<>();
+                        while (rs.next()) {
+                            long ownerQq = rs.getLong("qq");
+                            String uid = rs.getString("player_uuid");
+                            found.add("QQ" + ownerQq + (uid != null && !uid.isEmpty() ? " (UUID:" + uid.substring(0, 8) + "...)" : ""));
+                        }
+                        if (found.isEmpty()) {
+                            event.replyAt("未找到 " + name + " 的白名单记录");
+                        } else {
+                            event.replyAt("游戏ID " + name + " 的绑定信息:\n" + String.join("\n", found));
+                        }
+                    }
                 }
             }
             event.react(true);
@@ -655,30 +657,31 @@ public class BotCommandHandler {
     private void handleBanList(OneBotEvent event) {
         try {
             synchronized (storage) {
-                var conn = storage.getConnection();
-                var ps = conn.prepareStatement(
-                        "SELECT qq, reason, banned_at, expiry FROM qq_blacklist ORDER BY banned_at DESC LIMIT 50");
-                var rs = ps.executeQuery();
-                StringBuilder sb = new StringBuilder("封禁列表:\n");
-                int count = 0;
-                while (rs.next()) {
-                    long qq = rs.getLong("qq");
-                    String reason = rs.getString("reason");
-                    long expiry = rs.getLong("expiry");
-                    sb.append(++count).append(". QQ").append(qq);
-                    if (reason != null && !reason.isEmpty()) sb.append(" (").append(reason).append(")");
-                    if (expiry > 0 && expiry > System.currentTimeMillis()) {
-                        long remain = (expiry - System.currentTimeMillis()) / 1000;
-                        sb.append(" [剩余").append(formatDuration(remain)).append("]");
-                    } else if (expiry == 0) {
-                        sb.append(" [永久]");
+                try (var ps = storage.getConnection().prepareStatement(
+                        "SELECT qq, reason, banned_at, expiry FROM qq_blacklist ORDER BY banned_at DESC LIMIT 50")) {
+                    try (var rs = ps.executeQuery()) {
+                        StringBuilder sb = new StringBuilder("封禁列表:\n");
+                        int count = 0;
+                        while (rs.next()) {
+                            long qq = rs.getLong("qq");
+                            String reason = rs.getString("reason");
+                            long expiry = rs.getLong("expiry");
+                            sb.append(++count).append(". QQ").append(qq);
+                            if (reason != null && !reason.isEmpty()) sb.append(" (").append(reason).append(")");
+                            if (expiry > 0 && expiry > System.currentTimeMillis()) {
+                                long remain = (expiry - System.currentTimeMillis()) / 1000;
+                                sb.append(" [剩余").append(formatDuration(remain)).append("]");
+                            } else if (expiry == 0) {
+                                sb.append(" [永久]");
+                            }
+                            sb.append("\n");
+                        }
+                        if (count == 0) sb.append("(无)");
+                        delayReply();
+                        event.reply(sb.toString());
+                        event.react(true);
                     }
-                    sb.append("\n");
                 }
-                if (count == 0) sb.append("(无)");
-                delayReply();
-                event.reply(sb.toString());
-                event.react(true);
             }
         } catch (Exception e) {
             logger.warning("[BotHandler] Ban list failed: " + e.getMessage());

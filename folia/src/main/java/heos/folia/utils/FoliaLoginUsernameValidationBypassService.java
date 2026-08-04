@@ -202,12 +202,13 @@ public final class FoliaLoginUsernameValidationBypassService implements AutoClos
     private boolean isInDbWhitelist(String username) {
         try {
             synchronized (storage) {
-                var conn = storage.getConnection();
-                PreparedStatement ps = conn.prepareStatement(
-                        "SELECT 1 FROM qq_whitelist WHERE LOWER(player_name) = ?");
-                ps.setString(1, username.toLowerCase());
-                ResultSet rs = ps.executeQuery();
-                return rs.next();
+                try (PreparedStatement ps = storage.getConnection().prepareStatement(
+                        "SELECT 1 FROM qq_whitelist WHERE LOWER(player_name) = ?")) {
+                    ps.setString(1, username.toLowerCase());
+                    try (ResultSet rs = ps.executeQuery()) {
+                        return rs.next();
+                    }
+                }
             }
         } catch (Exception e) { return false; }
     }
@@ -215,10 +216,10 @@ public final class FoliaLoginUsernameValidationBypassService implements AutoClos
     private boolean dbWhitelistHasEntries() {
         try {
             synchronized (storage) {
-                var conn = storage.getConnection();
-                var ps = conn.prepareStatement("SELECT COUNT(*) FROM qq_whitelist");
-                var rs = ps.executeQuery();
-                return rs.next() && rs.getInt(1) > 0;
+                try (var ps = storage.getConnection().prepareStatement("SELECT COUNT(*) FROM qq_whitelist");
+                     var rs = ps.executeQuery()) {
+                    return rs.next() && rs.getInt(1) > 0;
+                }
             }
         } catch (Exception e) { return false; }
     }
@@ -248,17 +249,18 @@ public final class FoliaLoginUsernameValidationBypassService implements AutoClos
     private String dbBlacklistReason(String username) {
         try {
             synchronized (storage) {
-                var conn = storage.getConnection();
-                PreparedStatement ps = conn.prepareStatement(
+                try (PreparedStatement ps = storage.getConnection().prepareStatement(
                         "SELECT b.reason, b.expiry FROM qq_blacklist b " +
                         "INNER JOIN qq_whitelist w ON b.qq = w.qq " +
-                        "WHERE LOWER(w.player_name) = ? AND (b.expiry = 0 OR b.expiry > ?)");
-                ps.setString(1, username.toLowerCase());
-                ps.setLong(2, System.currentTimeMillis());
-                ResultSet rs = ps.executeQuery();
-                if (rs.next()) {
-                    String reason = rs.getString("reason");
-                    return reason != null && !reason.isEmpty() ? reason : "";
+                        "WHERE LOWER(w.player_name) = ? AND (b.expiry = 0 OR b.expiry > ?)")) {
+                    ps.setString(1, username.toLowerCase());
+                    ps.setLong(2, System.currentTimeMillis());
+                    try (ResultSet rs = ps.executeQuery()) {
+                        if (rs.next()) {
+                            String reason = rs.getString("reason");
+                            return reason != null && !reason.isEmpty() ? reason : "";
+                        }
+                    }
                 }
             }
         } catch (Exception e) {}
