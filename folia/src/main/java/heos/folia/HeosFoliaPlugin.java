@@ -224,20 +224,22 @@ public final class HeosFoliaPlugin extends JavaPlugin {
         // Add entities_killed column if old DB missing it
         java.io.File db = new java.io.File(getDataFolder(), "player_data.db");
         if (db.exists()) try {
-            var conn = storage.getConnection();
-            if (conn != null) synchronized (conn) {
-                try { conn.createStatement().execute("SELECT entities_killed FROM player_stats LIMIT 0"); }
-                catch (Exception e) {
-                    conn.createStatement().execute("ALTER TABLE player_stats ADD COLUMN entities_killed BIGINT DEFAULT 0");
-                    getLogger().info("[Upgrade] Added entities_killed column.");
-                }
-                try { conn.createStatement().execute("SELECT 1 FROM player_stats_daily LIMIT 0"); }
-                catch (Exception e) {
-                    conn.createStatement().execute("CREATE TABLE IF NOT EXISTS player_stats_daily ("
-                        + "uuid TEXT, date TEXT, play_time_seconds BIGINT DEFAULT 0, blocks_mined BIGINT DEFAULT 0,"
-                        + "blocks_placed BIGINT DEFAULT 0, chat_chars BIGINT DEFAULT 0, entities_killed BIGINT DEFAULT 0,"
-                        + "PRIMARY KEY (uuid, date))");
-                    getLogger().info("[Upgrade] Created player_stats_daily table.");
+            synchronized (storage) {
+                var conn = storage.getConnection();
+                if (conn != null) {
+                    try { conn.createStatement().execute("SELECT entities_killed FROM player_stats LIMIT 0"); }
+                    catch (Exception e) {
+                        conn.createStatement().execute("ALTER TABLE player_stats ADD COLUMN entities_killed BIGINT DEFAULT 0");
+                        getLogger().info("[Upgrade] Added entities_killed column.");
+                    }
+                    try { conn.createStatement().execute("SELECT 1 FROM player_stats_daily LIMIT 0"); }
+                    catch (Exception e) {
+                        conn.createStatement().execute("CREATE TABLE IF NOT EXISTS player_stats_daily ("
+                            + "uuid TEXT, date TEXT, play_time_seconds BIGINT DEFAULT 0, blocks_mined BIGINT DEFAULT 0,"
+                            + "blocks_placed BIGINT DEFAULT 0, chat_chars BIGINT DEFAULT 0, entities_killed BIGINT DEFAULT 0,"
+                            + "PRIMARY KEY (uuid, date))");
+                        getLogger().info("[Upgrade] Created player_stats_daily table.");
+                    }
                 }
             }
         } catch (Exception ignored) {}

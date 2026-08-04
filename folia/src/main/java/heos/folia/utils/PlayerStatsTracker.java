@@ -14,6 +14,14 @@ import java.util.logging.Logger;
 /**
  * Player statistics tracker with PAPI support and leaderboard.
  * Tracks: play time, blocks mined, blocks placed, chat characters.
+ *
+ * THREAD SAFETY: every DB access is wrapped in {@code synchronized (storage)} —
+ * the SAME monitor FoliaStorage uses for its own methods (load/saveSync) and
+ * BotDb. Locking on the JDBC connection object (synchronized(conn)) does NOT
+ * exclude the writer thread (synchronized(storage)), causing SQLITE_BUSY_SNAPSHOT
+ * "database is locked" where the INSERT/UPDATE silently fails. This corrupted
+ * stats AND, worse, collided with password resets (storage.save in the writer
+ * thread) so the new password hash never hit the disk.
  */
 public class PlayerStatsTracker {
     private final Plugin plugin;
@@ -30,33 +38,35 @@ public class PlayerStatsTracker {
 
     private void createTable() {
         try {
-            var conn = storage.getConnection();
-            // Aggregate stats (all-time)
-            conn.createStatement().execute("""
-                CREATE TABLE IF NOT EXISTS player_stats (
-                    uuid TEXT PRIMARY KEY,
-                    play_time_seconds BIGINT DEFAULT 0,
-                    blocks_mined BIGINT DEFAULT 0,
-                    blocks_placed BIGINT DEFAULT 0,
-                    chat_chars BIGINT DEFAULT 0,
-                    entities_killed BIGINT DEFAULT 0,
-                    last_seen_name TEXT,
-                    last_updated BIGINT
-                )
-            """);
-            // Daily stats (by date for time-range queries)
-            conn.createStatement().execute("""
-                CREATE TABLE IF NOT EXISTS player_stats_daily (
-                    uuid TEXT,
-                    date TEXT,
-                    play_time_seconds BIGINT DEFAULT 0,
-                    blocks_mined BIGINT DEFAULT 0,
-                    blocks_placed BIGINT DEFAULT 0,
-                    chat_chars BIGINT DEFAULT 0,
-                    entities_killed BIGINT DEFAULT 0,
-                    PRIMARY KEY (uuid, date)
-                )
-            """);
+            synchronized (storage) {
+                var conn = storage.getConnection();
+                // Aggregate stats (all-time)
+                conn.createStatement().execute("""
+                    CREATE TABLE IF NOT EXISTS player_stats (
+                        uuid TEXT PRIMARY KEY,
+                        play_time_seconds BIGINT DEFAULT 0,
+                        blocks_mined BIGINT DEFAULT 0,
+                        blocks_placed BIGINT DEFAULT 0,
+                        chat_chars BIGINT DEFAULT 0,
+                        entities_killed BIGINT DEFAULT 0,
+                        last_seen_name TEXT,
+                        last_updated BIGINT
+                    )
+                """);
+                // Daily stats (by date for time-range queries)
+                conn.createStatement().execute("""
+                    CREATE TABLE IF NOT EXISTS player_stats_daily (
+                        uuid TEXT,
+                        date TEXT,
+                        play_time_seconds BIGINT DEFAULT 0,
+                        blocks_mined BIGINT DEFAULT 0,
+                        blocks_placed BIGINT DEFAULT 0,
+                        chat_chars BIGINT DEFAULT 0,
+                        entities_killed BIGINT DEFAULT 0,
+                        PRIMARY KEY (uuid, date)
+                    )
+                """);
+            }
         } catch (Exception e) {
             logger.warning("[Stats] Failed to create tables: " + e.getMessage());
         }
@@ -103,8 +113,8 @@ public class PlayerStatsTracker {
         String name = player.getName();
         long now = System.currentTimeMillis();
         try {
-            var conn = storage.getConnection();
-            synchronized (conn) {
+            synchronized (storage) {
+                var conn = storage.getConnection();
                 String sql = "INSERT INTO player_stats (uuid, " + column
                     + ", play_time_seconds, blocks_mined, blocks_placed, chat_chars, entities_killed, last_seen_name, last_updated) "
                     + "VALUES (?1, ?2, 0, 0, 0, 0, 0, ?3, ?4) "
@@ -135,14 +145,16 @@ public class PlayerStatsTracker {
 
     private void updateName(Player player) {
         try {
-            var conn = storage.getConnection();
-            PreparedStatement ps = conn.prepareStatement(
-                "UPDATE player_stats SET last_seen_name = ?, last_updated = ? WHERE uuid = ?"
-            );
-            ps.setString(1, player.getName());
-            ps.setLong(2, System.currentTimeMillis());
-            ps.setString(3, player.getUniqueId().toString());
-            ps.executeUpdate();
+            synchronized (storage) {
+                var conn = storage.getConnection();
+                PreparedStatement ps = conn.prepareStatement(
+                    "UPDATE player_stats SET last_seen_name = ?, last_updated = ? WHERE uuid = ?"
+                );
+                ps.setString(1, player.getName());
+                ps.setLong(2, System.currentTimeMillis());
+                ps.setString(3, player.getUniqueId().toString());
+                ps.executeUpdate();
+            }
         } catch (Exception ignored) {}
     }
 
@@ -153,17 +165,19 @@ public class PlayerStatsTracker {
 
     public StatsEntry getStats(UUID uuid) {
         try {
-            var conn = storage.getConnection();
-            PreparedStatement ps = conn.prepareStatement(
-                "SELECT last_seen_name, play_time_seconds, blocks_mined, blocks_placed, chat_chars, entities_killed, last_updated FROM player_stats WHERE uuid = ?"
-            );
-            ps.setString(1, uuid.toString());
-            ResultSet rs = ps.executeQuery();
-            if (rs.next()) {
-                return new StatsEntry(rs.getString("last_seen_name"), uuid,
-                    rs.getLong("play_time_seconds"), rs.getLong("blocks_mined"),
-                    rs.getLong("blocks_placed"), rs.getLong("chat_chars"),
-                    rs.getLong("entities_killed"), rs.getLong("last_updated"));
+            synchronized (storage) {
+                var conn = storage.getConnection();
+                PreparedStatement ps = conn.prepareStatement(
+                    "SELECT last_seen_name, play_time_seconds, blocks_mined, blocks_placed, chat_chars, entities_killed, last_updated FROM player_stats WHERE uuid = ?"
+                );
+                ps.setString(1, uuid.toString());
+                ResultSet rs = ps.executeQuery();
+                if (rs.next()) {
+                    return new StatsEntry(rs.getString("last_seen_name"), uuid,
+                        rs.getLong("play_time_seconds"), rs.getLong("blocks_mined"),
+                        rs.getLong("blocks_placed"), rs.getLong("chat_chars"),
+                        rs.getLong("entities_killed"), rs.getLong("last_updated"));
+                }
             }
         } catch (Exception e) {
             logger.warning("[Stats] Query failed: " + e.getMessage());
@@ -175,20 +189,22 @@ public class PlayerStatsTracker {
     public List<StatsEntry> getTop(String column, int limit) {
         List<StatsEntry> list = new ArrayList<>();
         try {
-            var conn = storage.getConnection();
-            PreparedStatement ps = conn.prepareStatement(
-                "SELECT uuid, last_seen_name, play_time_seconds, blocks_mined, blocks_placed, chat_chars, entities_killed, last_updated " +
-                "FROM player_stats ORDER BY " + column + " DESC LIMIT ?"
-            );
-            ps.setInt(1, limit);
-            ResultSet rs = ps.executeQuery();
-            while (rs.next()) {
-                list.add(new StatsEntry(
-                    rs.getString("last_seen_name"),
-                    UUID.fromString(rs.getString("uuid")),
-                    rs.getLong("play_time_seconds"), rs.getLong("blocks_mined"),
-                    rs.getLong("blocks_placed"), rs.getLong("chat_chars"),
-                    rs.getLong("entities_killed"), rs.getLong("last_updated")));
+            synchronized (storage) {
+                var conn = storage.getConnection();
+                PreparedStatement ps = conn.prepareStatement(
+                    "SELECT uuid, last_seen_name, play_time_seconds, blocks_mined, blocks_placed, chat_chars, entities_killed, last_updated " +
+                    "FROM player_stats ORDER BY " + column + " DESC LIMIT ?"
+                );
+                ps.setInt(1, limit);
+                ResultSet rs = ps.executeQuery();
+                while (rs.next()) {
+                    list.add(new StatsEntry(
+                        rs.getString("last_seen_name"),
+                        UUID.fromString(rs.getString("uuid")),
+                        rs.getLong("play_time_seconds"), rs.getLong("blocks_mined"),
+                        rs.getLong("blocks_placed"), rs.getLong("chat_chars"),
+                        rs.getLong("entities_killed"), rs.getLong("last_updated")));
+                }
             }
         } catch (Exception e) {
             logger.warning("[Stats] Top query failed: " + e.getMessage());
@@ -199,23 +215,25 @@ public class PlayerStatsTracker {
     /** Player's rank in a stat (1-based). Returns 0 if not found. */
     public int getRank(UUID uuid, String column) {
         try {
-            var conn = storage.getConnection();
-            // First get the player's value
-            PreparedStatement ps = conn.prepareStatement(
-                "SELECT " + column + " FROM player_stats WHERE uuid = ?"
-            );
-            ps.setString(1, uuid.toString());
-            ResultSet rs = ps.executeQuery();
-            if (!rs.next()) return 0;
-            long value = rs.getLong(1);
+            synchronized (storage) {
+                var conn = storage.getConnection();
+                // First get the player's value
+                PreparedStatement ps = conn.prepareStatement(
+                    "SELECT " + column + " FROM player_stats WHERE uuid = ?"
+                );
+                ps.setString(1, uuid.toString());
+                ResultSet rs = ps.executeQuery();
+                if (!rs.next()) return 0;
+                long value = rs.getLong(1);
 
-            // Count how many have higher
-            ps = conn.prepareStatement(
-                "SELECT COUNT(*) FROM player_stats WHERE " + column + " > ?"
-            );
-            ps.setLong(1, value);
-            rs = ps.executeQuery();
-            if (rs.next()) return rs.getInt(1) + 1;
+                // Count how many have higher
+                ps = conn.prepareStatement(
+                    "SELECT COUNT(*) FROM player_stats WHERE " + column + " > ?"
+                );
+                ps.setLong(1, value);
+                rs = ps.executeQuery();
+                if (rs.next()) return rs.getInt(1) + 1;
+            }
         } catch (Exception e) {
             logger.warning("[Stats] Rank query failed: " + e.getMessage());
         }
@@ -267,22 +285,24 @@ public class PlayerStatsTracker {
     public StatsEntry getStatsForPeriod(UUID uuid, int days) {
         if (days <= 0) return getStats(uuid);
         try {
-            var conn = storage.getConnection();
-            String today = java.time.LocalDate.now().toString();
-            String since = java.time.LocalDate.now().minusDays(days).toString();
-            PreparedStatement ps = conn.prepareStatement(
-                "SELECT SUM(play_time_seconds) as pt, SUM(blocks_mined) as bm, " +
-                "SUM(blocks_placed) as bp, SUM(chat_chars) as cc, SUM(entities_killed) as ek " +
-                "FROM player_stats_daily WHERE uuid = ? AND date >= ? AND date <= ?"
-            );
-            ps.setString(1, uuid.toString());
-            ps.setString(2, since);
-            ps.setString(3, today);
-            ResultSet rs = ps.executeQuery();
-            if (rs.next()) {
-                return new StatsEntry(null, uuid,
-                    rs.getLong("pt"), rs.getLong("bm"), rs.getLong("bp"),
-                    rs.getLong("cc"), rs.getLong("ek"), System.currentTimeMillis());
+            synchronized (storage) {
+                var conn = storage.getConnection();
+                String today = java.time.LocalDate.now().toString();
+                String since = java.time.LocalDate.now().minusDays(days).toString();
+                PreparedStatement ps = conn.prepareStatement(
+                    "SELECT SUM(play_time_seconds) as pt, SUM(blocks_mined) as bm, " +
+                    "SUM(blocks_placed) as bp, SUM(chat_chars) as cc, SUM(entities_killed) as ek " +
+                    "FROM player_stats_daily WHERE uuid = ? AND date >= ? AND date <= ?"
+                );
+                ps.setString(1, uuid.toString());
+                ps.setString(2, since);
+                ps.setString(3, today);
+                ResultSet rs = ps.executeQuery();
+                if (rs.next()) {
+                    return new StatsEntry(null, uuid,
+                        rs.getLong("pt"), rs.getLong("bm"), rs.getLong("bp"),
+                        rs.getLong("cc"), rs.getLong("ek"), System.currentTimeMillis());
+                }
             }
         } catch (Exception e) {
             logger.warning("[Stats] Period query failed: " + e.getMessage());
@@ -295,29 +315,31 @@ public class PlayerStatsTracker {
         if (days <= 0) return getTop(column, limit);
         List<StatsEntry> list = new ArrayList<>();
         try {
-            var conn = storage.getConnection();
-            String since = java.time.LocalDate.now().minusDays(days).toString();
-            String today = java.time.LocalDate.now().toString();
-            PreparedStatement ps = conn.prepareStatement(
-                "SELECT uuid, SUM(" + column + ") as total FROM player_stats_daily " +
-                "WHERE date >= ? AND date <= ? GROUP BY uuid ORDER BY total DESC LIMIT ?"
-            );
-            ps.setString(1, since);
-            ps.setString(2, today);
-            ps.setInt(3, limit);
-            ResultSet rs = ps.executeQuery();
-            while (rs.next()) {
-                UUID uid = UUID.fromString(rs.getString("uuid"));
-                long val = rs.getLong("total");
-                var agg = getStats(uid);
-                String name = agg != null ? agg.name() : "未知";
-                list.add(new StatsEntry(name, uid,
-                    column.equals("play_time_seconds") ? val : 0,
-                    column.equals("blocks_mined") ? val : 0,
-                    column.equals("blocks_placed") ? val : 0,
-                    column.equals("chat_chars") ? val : 0,
-                    column.equals("entities_killed") ? val : 0,
-                    System.currentTimeMillis()));
+            synchronized (storage) {
+                var conn = storage.getConnection();
+                String since = java.time.LocalDate.now().minusDays(days).toString();
+                String today = java.time.LocalDate.now().toString();
+                PreparedStatement ps = conn.prepareStatement(
+                    "SELECT uuid, SUM(" + column + ") as total FROM player_stats_daily " +
+                    "WHERE date >= ? AND date <= ? GROUP BY uuid ORDER BY total DESC LIMIT ?"
+                );
+                ps.setString(1, since);
+                ps.setString(2, today);
+                ps.setInt(3, limit);
+                ResultSet rs = ps.executeQuery();
+                while (rs.next()) {
+                    UUID uid = UUID.fromString(rs.getString("uuid"));
+                    long val = rs.getLong("total");
+                    var agg = getStats(uid);
+                    String name = agg != null ? agg.name() : "未知";
+                    list.add(new StatsEntry(name, uid,
+                        column.equals("play_time_seconds") ? val : 0,
+                        column.equals("blocks_mined") ? val : 0,
+                        column.equals("blocks_placed") ? val : 0,
+                        column.equals("chat_chars") ? val : 0,
+                        column.equals("entities_killed") ? val : 0,
+                        System.currentTimeMillis()));
+                }
             }
         } catch (Exception e) {
             logger.warning("[Stats] Top period query failed: " + e.getMessage());

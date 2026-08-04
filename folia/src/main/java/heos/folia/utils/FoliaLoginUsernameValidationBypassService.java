@@ -201,21 +201,25 @@ public final class FoliaLoginUsernameValidationBypassService implements AutoClos
 
     private boolean isInDbWhitelist(String username) {
         try {
-            var conn = storage.getConnection();
-            PreparedStatement ps = conn.prepareStatement(
-                    "SELECT 1 FROM qq_whitelist WHERE LOWER(player_name) = ?");
-            ps.setString(1, username.toLowerCase());
-            ResultSet rs = ps.executeQuery();
-            return rs.next();
+            synchronized (storage) {
+                var conn = storage.getConnection();
+                PreparedStatement ps = conn.prepareStatement(
+                        "SELECT 1 FROM qq_whitelist WHERE LOWER(player_name) = ?");
+                ps.setString(1, username.toLowerCase());
+                ResultSet rs = ps.executeQuery();
+                return rs.next();
+            }
         } catch (Exception e) { return false; }
     }
 
     private boolean dbWhitelistHasEntries() {
         try {
-            var conn = storage.getConnection();
-            var ps = conn.prepareStatement("SELECT COUNT(*) FROM qq_whitelist");
-            var rs = ps.executeQuery();
-            return rs.next() && rs.getInt(1) > 0;
+            synchronized (storage) {
+                var conn = storage.getConnection();
+                var ps = conn.prepareStatement("SELECT COUNT(*) FROM qq_whitelist");
+                var rs = ps.executeQuery();
+                return rs.next() && rs.getInt(1) > 0;
+            }
         } catch (Exception e) { return false; }
     }
 
@@ -243,17 +247,19 @@ public final class FoliaLoginUsernameValidationBypassService implements AutoClos
     /** Returns ban reason if this player is bound to a blacklisted QQ, null otherwise. */
     private String dbBlacklistReason(String username) {
         try {
-            var conn = storage.getConnection();
-            PreparedStatement ps = conn.prepareStatement(
-                    "SELECT b.reason, b.expiry FROM qq_blacklist b " +
-                    "INNER JOIN qq_whitelist w ON b.qq = w.qq " +
-                    "WHERE LOWER(w.player_name) = ? AND (b.expiry = 0 OR b.expiry > ?)");
-            ps.setString(1, username.toLowerCase());
-            ps.setLong(2, System.currentTimeMillis());
-            ResultSet rs = ps.executeQuery();
-            if (rs.next()) {
-                String reason = rs.getString("reason");
-                return reason != null && !reason.isEmpty() ? reason : "";
+            synchronized (storage) {
+                var conn = storage.getConnection();
+                PreparedStatement ps = conn.prepareStatement(
+                        "SELECT b.reason, b.expiry FROM qq_blacklist b " +
+                        "INNER JOIN qq_whitelist w ON b.qq = w.qq " +
+                        "WHERE LOWER(w.player_name) = ? AND (b.expiry = 0 OR b.expiry > ?)");
+                ps.setString(1, username.toLowerCase());
+                ps.setLong(2, System.currentTimeMillis());
+                ResultSet rs = ps.executeQuery();
+                if (rs.next()) {
+                    String reason = rs.getString("reason");
+                    return reason != null && !reason.isEmpty() ? reason : "";
+                }
             }
         } catch (Exception e) {}
         return null;
