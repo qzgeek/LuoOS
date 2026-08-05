@@ -482,7 +482,8 @@ public class BotCommandHandler {
 
         String msg = "你的 LuoOS 账号 [" + data.effectiveDisplayName() + "] 密码已重置。\n"
                 + "新密码: " + newPassword + "\n"
-                + "请在游戏内使用 /login 登录，登录后请尽快用 /changepassword 修改密码。";
+                + "登录: 游戏内输入 /login " + newPassword + "\n"
+                + "改密: 登录后请尽快用 /changepassword <旧密码> <新密码> 修改密码";
         final FoliaPlayerData savedData = data;
         event.sendPrivateThen(qq, msg, sent -> {
             if (sent) {
