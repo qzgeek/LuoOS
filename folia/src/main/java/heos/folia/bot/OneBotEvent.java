@@ -45,7 +45,9 @@ public class OneBotEvent {
     }
 
     public void replyPrivate(String message) {
-        callApi("send_private_msg", "{\"user_id\":" + userId() + ",\"message\":[{\"type\":\"text\",\"data\":{\"text\":\""
+        String groupPart = groupId() > 0 ? ",\"group_id\":" + groupId() : "";
+        callApi("send_private_msg", "{\"user_id\":" + userId() + groupPart
+                + ",\"message\":[{\"type\":\"text\",\"data\":{\"text\":\""
                 + escape(message) + "\"}}]}");
     }
 
@@ -75,8 +77,9 @@ public class OneBotEvent {
     /** Send a private message to an arbitrary QQ and report whether it was accepted (retcode == 0). */
     public boolean sendPrivateChecked(long targetQq, String message) {
         try {
+            String groupPart = groupId() > 0 ? ",\"group_id\":" + groupId() : "";
             JsonObject resp = callApiAsync("send_private_msg",
-                    "{\"user_id\":" + targetQq
+                    "{\"user_id\":" + targetQq + groupPart
                             + ",\"message\":[{\"type\":\"text\",\"data\":{\"text\":\"" + escape(message) + "\"}}]}")
                     .get(8, TimeUnit.SECONDS);
             if (resp == null) return false;
@@ -92,10 +95,16 @@ public class OneBotEvent {
      * CRITICAL: never block the WebSocket worker thread waiting for an API response —
      * the worker that dispatched the request is also the one that must process the
      * reply, so a synchronous get() deadlocks until the 10s timeout.
+     *
+     * Includes group_id when the event came from a group: NapCat/OneBot then sends
+     * via GROUP TEMP SESSION (TEMPC2CFROMGROUP) for non-friends instead of failing
+     * on C2C. QQ blocks direct private messages to non-friends; group temp chat
+     * works as long as the target hasn't disabled it.
      */
     public void sendPrivateThen(long targetQq, String message, java.util.function.Consumer<Boolean> callback) {
+        String groupPart = groupId() > 0 ? ",\"group_id\":" + groupId() : "";
         callApiAsync("send_private_msg",
-                "{\"user_id\":" + targetQq
+                "{\"user_id\":" + targetQq + groupPart
                         + ",\"message\":[{\"type\":\"text\",\"data\":{\"text\":\"" + escape(message) + "\"}}]}")
                 .thenAccept(resp -> {
                     boolean ok = resp != null && resp.has("status") && "ok".equals(resp.get("status").getAsString())
