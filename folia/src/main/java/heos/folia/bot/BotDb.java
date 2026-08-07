@@ -58,6 +58,24 @@ public class BotDb {
         return players;
     }
 
+    /** Check whether a player name is already claimed by ANY QQ (including frozen entries). */
+    public boolean isNameTaken(String playerName) {
+        try {
+            synchronized (storage) {
+                try (PreparedStatement ps = storage.getConnection().prepareStatement(
+                        "SELECT 1 FROM qq_whitelist WHERE player_name = ?")) {
+                    ps.setString(1, playerName);
+                    try (ResultSet rs = ps.executeQuery()) {
+                        return rs.next();
+                    }
+                }
+            }
+        } catch (Exception e) {
+            logger.warning("[BotDb] isNameTaken: " + e.getMessage());
+            return false; // on error, allow — DB index will catch the dup
+        }
+    }
+
     public int getWhitelistCount(long qq) {
         try {
             synchronized (storage) {

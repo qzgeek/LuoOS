@@ -395,6 +395,11 @@ public class BotCommandHandler {
             logger.info("[BotHandler] handleApply: already whitelisted qq=" + qq + " " + playerId);
             event.react(false); return;
         }
+        if (botDb.isNameTaken(playerId)) {
+            logger.info("[BotHandler] handleApply: name already taken by another QQ: " + playerId);
+            event.replyAt("该游戏 ID \"" + playerId + "\" 已被其他人申请，请更换 ID 后重试。");
+            event.react(false); return;
+        }
         int count = botDb.getWhitelistCount(qq);
         if (count >= maxPerQq) {
             logger.info("[BotHandler] handleApply: limit reached qq=" + qq + " count=" + count);

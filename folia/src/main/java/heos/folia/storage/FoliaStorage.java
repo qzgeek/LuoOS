@@ -147,6 +147,15 @@ public final class FoliaStorage {
                     + "PRIMARY KEY (qq, player_name)"
                     + ");");
             s.executeUpdate("CREATE INDEX IF NOT EXISTS idx_qq_whitelist_uuid ON qq_whitelist(player_uuid);");
+            // Enforce that each game ID (player_name) can only be claimed once across ALL QQ accounts.
+            // Older DBs may have duplicates — failure here is non-fatal; the BotCommandHandler
+            // isNameTaken() check provides the application-layer guard.
+            try {
+                s.executeUpdate("CREATE UNIQUE INDEX IF NOT EXISTS idx_qq_whitelist_name ON qq_whitelist(player_name);");
+            } catch (Exception e) {
+                LOGGER.warning("[LuoOS] Failed to create UNIQUE INDEX on qq_whitelist.player_name "
+                        + "— existing duplicate IDs detected. Run manual cleanup.");
+            }
 
             s.executeUpdate("CREATE TABLE IF NOT EXISTS qq_blacklist ("
                     + "qq BIGINT PRIMARY KEY,"
