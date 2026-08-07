@@ -189,45 +189,41 @@ public class ResourceWorldManager implements AutoCloseable {
                 plugin.saveConfig();
                 scheduleFixedDate();
             });
-        } else {
-            // Worlds exist on disk — resolve references first, then schedule
-            resolveExistingWorlds();
-            scheduleFixedDate();
+            return;
         }
+
+        // Worlds exist on disk. On restart they may not be registered yet,
+        // so do not treat a first failed scan as data loss.
+        resolveExistingWorlds();
+        scheduleFixedDate();
+        Bukkit.getAsyncScheduler().runDelayed(plugin, task -> resolveExistingWorlds(), 5, TimeUnit.SECONDS);
     }
 
     /**
      * Resolve existing resource worlds from Bukkit after a restart.
      * After onEnable(), resourceWorld/resourceNether/resourceEnd are null
-     * even though the worlds exist on disk. This scans Bukkit.getWorlds()
-     * for worlds whose name contains the PREFIX and sets the references.
+     * even though the worlds may already be loaded. This only rebinds the
+     * in-memory references; it never recreates worlds by itself.
      */
     private void resolveExistingWorlds() {
-        resourceWorld = null;
-        resourceNether = null;
-        resourceEnd = null;
-        for (World w : Bukkit.getWorlds()) {
-            String name = w.getName();
-            if (MAIN_KEY.equals(name)) {
-                resourceWorld = w;
-            } else if (NETHER_KEY.equals(name)) {
-                resourceNether = w;
-            } else if (END_KEY.equals(name)) {
-                resourceEnd = w;
-            }
-        }
+        resourceWorld = findLoadedWorld(MAIN_KEY);
+        resourceNether = findLoadedWorld(NETHER_KEY);
+        resourceEnd = findLoadedWorld(END_KEY);
+
         if (resourceWorld != null) {
             logger.info("[ResourceWorld] Resolved existing worlds (seed: " + currentSeed() + ")");
         } else {
-            // Worlds exist on disk but not loaded by Worlds plugin — trigger fresh creation
-            logger.warning("[ResourceWorld] Disk worlds found but not loaded — recreating");
-            plugin.getConfig().set(CFG_SEED, null);
-            plugin.saveConfig();
-            createResourceWorldsAsync(() -> {
-                updateNextRefresh();
-                plugin.saveConfig();
-            });
+            logger.warning("[ResourceWorld] Resource world not registered yet; will retry later");
         }
+    }
+
+    private World findLoadedWorld(String name) {
+        World world = Bukkit.getWorld(name);
+        if (world != null) return world;
+        for (World w : Bukkit.getWorlds()) {
+            if (name.equals(w.getName())) return w;
+        }
+        return null;
     }
 
     /**
