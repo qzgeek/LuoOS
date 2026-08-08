@@ -536,6 +536,13 @@ public final class FoliaStorage {
         return connection;
     }
 
+    /** Submit a DB write task to the dedicated writer thread (non-blocking).
+     *  External modules (PlayerStatsTracker, etc.) MUST use this instead of
+     *  calling getConnection() directly from a Folia region thread. */
+    public void submitWrite(Runnable task) {
+        writer.execute(task);
+    }
+
     public synchronized void close() {
         writer.shutdown();
         try {
