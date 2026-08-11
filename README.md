@@ -1,4 +1,4 @@
-# LuoOS v0.09-dev 使用文档
+# LuoOS v0.09 使用文档
 
 LuoOS 是一款面向 Folia 服务器的综合管理插件，提供登录认证、账号绑定、QQ机器人、玩家统计排行榜、资源世界自动刷新等功能。
 
@@ -6,18 +6,18 @@ LuoOS 是一款面向 Folia 服务器的综合管理插件，提供登录认证�
 
 | 版本范围 | Jar 文件 |
 |---------|---------|
-| 1.20 - 1.20.1 | `luoos-folia-mc1.20-1.20.1-0.09-dev.jar` |
-| 1.20.2 - 1.20.3 | `luoos-folia-mc1.20.2-1.20.3-0.09-dev.jar` |
-| 1.20.4 | `luoos-folia-mc1.20.4-0.09-dev.jar` |
-| 1.20.5 - 1.20.6 | `luoos-folia-mc1.20.5-1.20.6-0.09-dev.jar` |
-| 1.21 - 1.21.4 | `luoos-folia-mc1.21-1.21.4-0.09-dev.jar` |
-| 1.21.5 | `luoos-folia-mc1.21.5-0.09-dev.jar` |
-| 1.21.6 - 1.21.7 | `luoos-folia-mc1.21.6-1.21.7-0.09-dev.jar` |
-| 1.21.8 - 1.21.10 | `luoos-folia-mc1.21.8-1.21.10-0.09-dev.jar` |
-| 1.21.11 | `luoos-folia-mc1.21.11-0.09-dev.jar` |
-| 26.1 | `luoos-folia-mc26.1-0.09-dev.jar` |
-| 26.1.1 | `luoos-folia-mc26.1.1-0.09-dev.jar` |
-| 26.1.2 | `luoos-folia-mc26.1.2-0.09-dev.jar` |
+| 1.20 - 1.20.1 | `luoos-folia-mc1.20-1.20.1-0.09.jar` |
+| 1.20.2 - 1.20.3 | `luoos-folia-mc1.20.2-1.20.3-0.09.jar` |
+| 1.20.4 | `luoos-folia-mc1.20.4-0.09.jar` |
+| 1.20.5 - 1.20.6 | `luoos-folia-mc1.20.5-1.20.6-0.09.jar` |
+| 1.21 - 1.21.4 | `luoos-folia-mc1.21-1.21.4-0.09.jar` |
+| 1.21.5 | `luoos-folia-mc1.21.5-0.09.jar` |
+| 1.21.6 - 1.21.7 | `luoos-folia-mc1.21.6-1.21.7-0.09.jar` |
+| 1.21.8 - 1.21.10 | `luoos-folia-mc1.21.8-1.21.10-0.09.jar` |
+| 1.21.11 | `luoos-folia-mc1.21.11-0.09.jar` |
+| 26.1 | `luoos-folia-mc26.1-0.09.jar` |
+| 26.1.1 | `luoos-folia-mc26.1.1-0.09.jar` |
+| 26.1.2 | `luoos-folia-mc26.1.2-0.09.jar` |
 
 推荐启动命令（Folia 26.1+）：
 ```bash
@@ -43,6 +43,8 @@ v0.08 内置自动升级系统：
 - 升级完成后创建 `.upgraded_v08` 标记文件，不会重复升级
 
 无需手动操作，安装新版 jar 后直接重启即可。
+
+**v0.09 资源世界兼容升级**：旧版本的 `plugins/luoos/config.yml`、`player_data.db`、Worlds 世界目录均可直接保留。升级启动时会优先识别 `world/dimensions/luoos_resource/res_world` 等既有目录；如果旧版本未保存 `resourceWorld.currentSeed`，LuoOS 会从现有世界恢复种子，并将未导入的 Worlds 世界重新登记后加载。不会因为重启而删除或重新生成旧资源世界。
 
 ---
 
@@ -240,7 +242,7 @@ resourceWorld:
   end: true                  # 创建资源终界
 ```
 
-**注意**：v0.08 使用固定日期刷新策略，不再使用 `refreshIntervalMinutes`。每次刷新后自动计算下一个月的刷新时间，服务器重启后倒计时不会重置。
+**注意**：v0.09 使用固定日期刷新策略，不再使用旧版 `refreshIntervalMinutes`。默认每月25日 08:00 刷新；每次刷新后自动计算下一个月的刷新时间，服务器重启后倒计时不会重置。升级旧配置时无需手动删除旧键，新增的 `refreshDayOfMonth` 和 `refreshHour` 缺失时会使用默认值。
 
 ### 命令
 
@@ -339,4 +341,4 @@ usernameLoginFailureLockSeconds: 30   # 锁定时间(秒)
 
 - 作者: chara201x, qzgeek (黔中极客)
 - GitHub: https://github.com/qzgeek/heos-public
-- 分支: main | 标签: v0.09-dev
+- 分支: main | 标签: v0.09

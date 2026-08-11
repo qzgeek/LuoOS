@@ -38,7 +38,10 @@ public class ResourceWorldManager implements AutoCloseable {
     private java.lang.reflect.Method dimMethod;
     private java.lang.reflect.Method seedMethod;
     private java.lang.reflect.Method buildMethod;
+    private java.lang.reflect.Method loadMethod;
     private Object owDim, nDim, eDim;
+
+    private volatile boolean loadingExisting = false;
 
     public ResourceWorldManager(Plugin plugin) {
         this.plugin = plugin;
@@ -104,14 +107,17 @@ public class ResourceWorldManager implements AutoCloseable {
 
         long seed = random.nextLong();
         final String seedStr = String.valueOf(Math.abs(seed));
-        plugin.getConfig().set(CFG_SEED, seedStr);
-        plugin.saveConfig();
 
         boolean nether = plugin.getConfig().getBoolean("resourceWorld.nether", true);
         boolean end = plugin.getConfig().getBoolean("resourceWorld.end", true);
 
         // Delete old worlds first (async)
         deleteOldAsync().thenRun(() -> {
+            // Persist the new seed only after deletion has completed. Older
+            // code cleared this key inside deleteOldAsync(), so every restart
+            // saw a missing seed and generated a fresh resource world.
+            plugin.getConfig().set(CFG_SEED, seedStr);
+            plugin.saveConfig();
             logger.info("[ResourceWorld] Creating with seed " + seedStr);
 
             // Create overworld → save reference
@@ -154,13 +160,14 @@ public class ResourceWorldManager implements AutoCloseable {
 
         long seed = random.nextLong();
         String seedStr = String.valueOf(Math.abs(seed));
-        plugin.getConfig().set(CFG_SEED, seedStr);
-        plugin.saveConfig();
 
         boolean nether = plugin.getConfig().getBoolean("resourceWorld.nether", true);
         boolean end = plugin.getConfig().getBoolean("resourceWorld.end", true);
 
         deleteOldResourceWorlds();
+
+        plugin.getConfig().set(CFG_SEED, seedStr);
+        plugin.saveConfig();
 
         logger.info("[ResourceWorld] Creating with seed " + seedStr);
         try {
@@ -182,7 +189,7 @@ public class ResourceWorldManager implements AutoCloseable {
         }
 
         String seed = currentSeed();
-        if (seed == null || !worldExists(seed)) {
+        if (!worldExists()) {
             // No existing worlds — create fresh, then schedule
             createResourceWorldsAsync(() -> {
                 updateNextRefresh();
@@ -195,8 +202,16 @@ public class ResourceWorldManager implements AutoCloseable {
         // Worlds exist on disk. On restart they may not be registered yet,
         // so do not treat a first failed scan as data loss.
         resolveExistingWorlds();
+        recoverSeedFromLoadedWorld();
         scheduleFixedDate();
-        Bukkit.getAsyncScheduler().runDelayed(plugin, task -> resolveExistingWorlds(), 5, TimeUnit.SECONDS);
+        // Worlds may finish registering after LuoOS.onEnable(). Retry several
+        // times, but never recreate merely because the first lookup is early.
+        for (long delay : new long[] {5, 15, 30}) {
+            Bukkit.getAsyncScheduler().runDelayed(plugin, task -> {
+                resolveExistingWorlds();
+                recoverSeedFromLoadedWorld();
+            }, delay, TimeUnit.SECONDS);
+        }
     }
 
     /**
@@ -206,22 +221,119 @@ public class ResourceWorldManager implements AutoCloseable {
      * in-memory references; it never recreates worlds by itself.
      */
     private void resolveExistingWorlds() {
-        resourceWorld = findLoadedWorld(MAIN_KEY);
-        resourceNether = findLoadedWorld(NETHER_KEY);
-        resourceEnd = findLoadedWorld(END_KEY);
+        World main = findLoadedWorld(MAIN_KEY);
+        World nether = findLoadedWorld(NETHER_KEY);
+        World end = findLoadedWorld(END_KEY);
+        // Bukkit lookup is unreliable for custom namespaces on Folia. Never
+        // overwrite a valid direct reference with null during a later retry.
+        if (main != null) resourceWorld = main;
+        if (nether != null) resourceNether = nether;
+        if (end != null) resourceEnd = end;
 
         if (resourceWorld != null) {
             logger.info("[ResourceWorld] Resolved existing worlds (seed: " + currentSeed() + ")");
         } else {
-            logger.warning("[ResourceWorld] Resource world not registered yet; will retry later");
+            logger.warning("[ResourceWorld] Resource world not registered yet; requesting Worlds load");
+            loadExistingWorlds();
         }
+    }
+
+    /** Load the persisted Worlds entries after a restart, without regeneration. */
+    @SuppressWarnings("unchecked")
+    private void loadExistingWorlds() {
+        if (loadingExisting || !initReflection()) return;
+        loadingExisting = true;
+        try {
+            Class<?> keyClass = Class.forName("net.kyori.adventure.key.Key");
+            java.lang.reflect.Method keyMethod = keyClass.getMethod("key", String.class, String.class);
+            Object registry = worldsPlugin.getClass().getMethod("getWorldRegistry").invoke(worldsPlugin);
+            Object modernRegistry = worldsPlugin.getClass().getMethod("modernWorldRegistry").invoke(worldsPlugin);
+            java.lang.reflect.Method readMethod = modernRegistry.getClass().getMethod("read", java.nio.file.Path.class);
+            java.lang.reflect.Method registerMethod = registry.getClass().getMethod("register",
+                    keyClass, Class.forName("net.thenextlvl.worlds.Dimension"), boolean.class,
+                    Class.forName("net.thenextlvl.worlds.generator.Generator"));
+            java.lang.reflect.Method dataKeyMethod = Class.forName(
+                    "net.thenextlvl.worlds.ModernWorldRegistry$ModernWorldData").getMethod("key");
+            List<String> keys = new ArrayList<>();
+            if (resourceWorld == null && diskWorldExists(MAIN_KEY)) keys.add(MAIN_KEY);
+            if (resourceNether == null && diskWorldExists(NETHER_KEY)) keys.add(NETHER_KEY);
+            if (resourceEnd == null && diskWorldExists(END_KEY)) keys.add(END_KEY);
+
+            List<CompletableFuture<World>> futures = new ArrayList<>();
+            for (String keyName : keys) {
+                java.nio.file.Path worldPath = new java.io.File(Bukkit.getWorldContainer(),
+                        "world/dimensions/" + NAMESPACE + "/" + keyName).toPath();
+                Object importedResult = readMethod.invoke(modernRegistry, worldPath);
+                Object importedData = importedResult instanceof java.util.Optional<?> optional
+                        ? optional.orElse(null) : importedResult;
+                Object key = importedData != null
+                        ? dataKeyMethod.invoke(importedData)
+                        : keyMethod.invoke(null, NAMESPACE, keyName);
+                Object dimension = MAIN_KEY.equals(keyName) ? owDim
+                        : (NETHER_KEY.equals(keyName) ? nDim : eDim);
+                if (importedData != null) {
+                    try {
+                        registerMethod.invoke(registry, key, dimension, true, null);
+                        logger.info("[ResourceWorld] Imported existing world into Worlds: " + key);
+                    } catch (Exception e) {
+                        // It may already be registered; load() below is still valid.
+                        logger.fine("[ResourceWorld] World already registered: " + key);
+                    }
+                }
+                futures.add((CompletableFuture<World>) loadMethod.invoke(worldsPlugin, key));
+            }
+            CompletableFuture.allOf(futures.toArray(new CompletableFuture[0]))
+                    .thenRun(() -> {
+                        for (CompletableFuture<World> future : futures) {
+                            try {
+                                World world = future.join();
+                                if (world == null) continue;
+                                if (MAIN_KEY.equals(world.getName())) resourceWorld = world;
+                                else if (NETHER_KEY.equals(world.getName())) resourceNether = world;
+                                else if (END_KEY.equals(world.getName())) resourceEnd = world;
+                                applyResourceGamerules(world);
+                            } catch (Exception e) {
+                                logger.warning("[ResourceWorld] Existing world load failed: " + e.getMessage());
+                            }
+                        }
+                        recoverSeedFromLoadedWorld();
+                        logger.info("[ResourceWorld] Existing worlds loaded without regeneration");
+                        loadingExisting = false;
+                    })
+                    .exceptionally(e -> {
+                        logger.warning("[ResourceWorld] Existing world load failed: " + e.getMessage());
+                        loadingExisting = false;
+                        return null;
+                    });
+        } catch (Exception e) {
+            loadingExisting = false;
+            logger.warning("[ResourceWorld] Existing world load request failed: " + e.getMessage());
+        }
+    }
+
+    private boolean diskWorldExists(String key) {
+        java.io.File dir = new java.io.File(Bukkit.getWorldContainer(),
+                "world/dimensions/" + NAMESPACE + "/" + key);
+        return dir.isDirectory();
+    }
+
+    /** Recover the seed lost by older versions from the loaded world itself. */
+    private void recoverSeedFromLoadedWorld() {
+        World world = resourceWorld;
+        if (world == null || currentSeed() != null) return;
+        String seed = String.valueOf(Math.abs(world.getSeed()));
+        plugin.getConfig().set(CFG_SEED, seed);
+        plugin.saveConfig();
+        logger.info("[ResourceWorld] Recovered missing seed from existing world: " + seed);
     }
 
     private World findLoadedWorld(String name) {
         World world = Bukkit.getWorld(name);
         if (world != null) return world;
+        String namespaced = NAMESPACE + ":" + name;
         for (World w : Bukkit.getWorlds()) {
-            if (name.equals(w.getName())) return w;
+            if (name.equals(w.getName()) || namespaced.equals(String.valueOf(w.getKey()))
+                    || name.equals(w.getKey().getKey())) return w;
         }
         return null;
     }
@@ -287,17 +399,16 @@ public class ResourceWorldManager implements AutoCloseable {
         logger.info("[ResourceWorld] Schedule active: next refresh at " + new java.util.Date(stored));
     }
 
-    private boolean worldExists(String seed) {
+    private boolean worldExists() {
         if (resourceWorld != null) return true;
-        // Check if world files exist on disk (survives restarts)
+        // Check if world files exist on disk (survives restarts).
+        // Do not require currentSeed: older versions could erase that key
+        // while leaving a perfectly valid resource world on disk.
         java.io.File dimsDir = new java.io.File(Bukkit.getWorldContainer(), "world/dimensions/" + NAMESPACE);
         if (!dimsDir.isDirectory()) return false;
-        java.io.File[] files = dimsDir.listFiles();
-        if (files == null) return false;
-        for (java.io.File f : files) {
-            if (f.getName().contains(PREFIX)) return true;
-        }
-        return false;
+        java.io.File mainDir = new java.io.File(dimsDir, MAIN_KEY);
+        return new java.io.File(mainDir, "level.dat").isFile()
+                || new java.io.File(mainDir, "region").isDirectory();
     }
 
     private void scheduleRefresh(int intervalMinutes) {
@@ -405,6 +516,7 @@ public class ResourceWorldManager implements AutoCloseable {
             seedMethod = builderMethod.getReturnType().getMethod("seed", Long.class);
             buildMethod = builderMethod.getReturnType().getMethod("build");
             createMethod = worldsAccessClass.getMethod("create", levelClass);
+            loadMethod = worldsAccessClass.getMethod("load", Class.forName("net.kyori.adventure.key.Key"));
 
             return true;
         } catch (Exception e) {
@@ -455,8 +567,6 @@ public class ResourceWorldManager implements AutoCloseable {
                 java.io.File[] files = dimsDir.listFiles();
                 if (files != null) for (java.io.File f : files) if (f.getName().contains(PREFIX)) deleteFolder(f);
             }
-            plugin.getConfig().set(CFG_SEED, null);
-            plugin.saveConfig();
             resourceWorld = null;
             resourceNether = null;
             resourceEnd = null;
@@ -491,8 +601,6 @@ public class ResourceWorldManager implements AutoCloseable {
                 java.io.File[] files = dimsDir.listFiles();
                 if (files != null) for (java.io.File file : files) if (file.getName().contains(PREFIX)) deleteFolder(file);
             }
-            plugin.getConfig().set(CFG_SEED, null);
-            plugin.saveConfig();
             resourceWorld = null;
             resourceNether = null;
             resourceEnd = null;
