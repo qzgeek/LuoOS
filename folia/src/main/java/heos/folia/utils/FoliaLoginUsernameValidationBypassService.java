@@ -186,14 +186,20 @@ public final class FoliaLoginUsernameValidationBypassService implements AutoClos
     }
 
     private boolean rejectWhitelist(String username, Channel ch) {
-        // Always check DB whitelist (QQ bot whitelist) — single source of truth
+        // Always check DB whitelist (QQ bot whitelist) — single source of truth.
+        // Only NON-FROZEN entries count as whitelisted; frozen (退群/被踢) players
+        // must be rejected here at the Netty layer, otherwise they can still join
+        // even though the whitelist UI shows them as 冻结.
         if (isInDbWhitelist(username)) return false;
         // Fallback: JSON whitelist (legacy)
         if (plugin.getConfig().getBoolean("enableWhitelist", false) && whitelistData.isWhitelisted(username))
             return false;
         // DB has entries = whitelist is active, deny those not in it
         if (dbWhitelistHasEntries()) {
-            disconnectLogin(ch, "你不在白名单中，请先在QQ群中申请");
+            String msg = isFrozenInDbWhitelist(username)
+                    ? "你的白名单已被冻结（已退出QQ群），重新进群后自动恢复"
+                    : "你不在白名单中，请先在QQ群中申请";
+            disconnectLogin(ch, msg);
             return true;
         }
         return false;
@@ -203,7 +209,22 @@ public final class FoliaLoginUsernameValidationBypassService implements AutoClos
         try {
             synchronized (storage) {
                 try (PreparedStatement ps = storage.getConnection().prepareStatement(
-                        "SELECT 1 FROM qq_whitelist WHERE LOWER(player_name) = ?")) {
+                        "SELECT 1 FROM qq_whitelist WHERE LOWER(player_name) = ? AND (frozen = 0 OR frozen IS NULL)")) {
+                    ps.setString(1, username.toLowerCase());
+                    try (ResultSet rs = ps.executeQuery()) {
+                        return rs.next();
+                    }
+                }
+            }
+        } catch (Exception e) { return false; }
+    }
+
+    /** True if this player name exists in the DB whitelist but is frozen (退群/被踢). */
+    private boolean isFrozenInDbWhitelist(String username) {
+        try {
+            synchronized (storage) {
+                try (PreparedStatement ps = storage.getConnection().prepareStatement(
+                        "SELECT 1 FROM qq_whitelist WHERE LOWER(player_name) = ? AND frozen = 1")) {
                     ps.setString(1, username.toLowerCase());
                     try (ResultSet rs = ps.executeQuery()) {
                         return rs.next();
