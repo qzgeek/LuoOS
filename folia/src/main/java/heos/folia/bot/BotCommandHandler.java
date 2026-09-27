@@ -2,6 +2,7 @@ package heos.folia.bot;
 
 import heos.folia.storage.FoliaPlayerData;
 import heos.folia.storage.FoliaStorage;
+import heos.folia.storage.FoliaWhitelistRepository;
 
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
@@ -29,6 +30,7 @@ public class BotCommandHandler {
     private final Logger logger;
     private final BotDb botDb;
     private final FoliaStorage storage;
+    private final FoliaWhitelistRepository whitelistRepository;
     private final BotStatusService statusService;
     private final int maxPerQq;
     private final Pattern idPattern;
@@ -74,7 +76,8 @@ public class BotCommandHandler {
     // Deny emoji
     private static final int EMOJI_DENY = 15;
 
-    public BotCommandHandler(Logger logger, BotDb botDb, FoliaStorage storage, BotStatusService statusService,
+    public BotCommandHandler(Logger logger, BotDb botDb, FoliaStorage storage,
+                             FoliaWhitelistRepository whitelistRepository, BotStatusService statusService,
                              int maxPerQq, String allowedIdChars, int maxIdLength,
                              long[] allowedGroups, String statusTrigger,
                              int rateMax, int rateWindowSec,
@@ -82,6 +85,7 @@ public class BotCommandHandler {
         this.logger = logger;
         this.botDb = botDb;
         this.storage = storage;
+        this.whitelistRepository = whitelistRepository;
         this.statusService = statusService;
         this.maxPerQq = maxPerQq;
         // Sanitize regex: preserve range hyphens (a-z etc.), move standalone '-' to end
@@ -408,7 +412,11 @@ public class BotCommandHandler {
         String uuid = null;
         var data = storage.load(playerId);
         if (data != null) uuid = data.uuid.toString();
-        botDb.addWhitelist(qq, playerId, uuid);
+        if (!botDb.addWhitelist(qq, playerId, uuid)) {
+            event.replyAt("白名单写入失败，请稍后重试。");
+            event.react(false);
+            return;
+        }
         try {
             org.bukkit.Bukkit.getGlobalRegionScheduler().run(
                     org.bukkit.Bukkit.getPluginManager().getPlugin("luoos"),
@@ -508,21 +516,7 @@ public class BotCommandHandler {
 
     /** Case-insensitive lookup of the exact stored account name owned by this QQ. */
     private String findOwnedAccountName(long qq, String accountName) {
-        try {
-            synchronized (storage) {
-                try (var ps = storage.getConnection().prepareStatement(
-                        "SELECT player_name FROM qq_whitelist WHERE qq = ? AND LOWER(player_name) = LOWER(?)")) {
-                    ps.setLong(1, qq);
-                    ps.setString(2, accountName);
-                    try (var rs = ps.executeQuery()) {
-                        if (rs.next()) return rs.getString("player_name");
-                    }
-                }
-            }
-        } catch (Exception e) {
-            logger.warning("[BotHandler] findOwnedAccountName failed: " + e.getMessage());
-        }
-        return null;
+        return whitelistRepository.findOwnedAccountName(qq, accountName);
     }
 
     /** Random password from unambiguous chars (no 0/O, 1/l/I). */
@@ -570,32 +564,17 @@ public class BotCommandHandler {
         String name = arg.replaceAll("\\[CQ:[^]]+\\]", "").trim();
         name = name.replaceAll("^[\"'\\u201c\\u201d\\u2018\\u2019]", "").replaceAll("[\"'\\u201c\\u201d\\u2018\\u2019]$", "");
 
-        // Reverse lookup: find QQ(s) that own this game ID
-        try {
-            synchronized (storage) {
-                try (var ps = storage.getConnection().prepareStatement("SELECT qq, player_uuid FROM qq_whitelist WHERE LOWER(player_name) = ?")) {
-                    ps.setString(1, name.toLowerCase());
-                    try (var rs = ps.executeQuery()) {
-                        List<String> found = new ArrayList<>();
-                        while (rs.next()) {
-                            long ownerQq = rs.getLong("qq");
-                            String uid = rs.getString("player_uuid");
-                            found.add("QQ" + ownerQq + (uid != null && !uid.isEmpty() ? " (UUID:" + uid.substring(0, 8) + "...)" : ""));
-                        }
-                        if (found.isEmpty()) {
-                            event.replyAt("未找到 " + name + " 的白名单记录");
-                        } else {
-                            event.replyAt("游戏ID " + name + " 的绑定信息:\n" + String.join("\n", found));
-                        }
-                    }
-                }
-            }
-            event.react(true);
-        } catch (Exception e) {
-            logger.warning("[BotHandler] Reverse query failed: " + e.getMessage());
-            event.replyAt("查询失败");
-            event.react(false);
+        // Reverse lookup is owned by the repository; the bot only formats it.
+        List<String> found = new ArrayList<>();
+        for (FoliaWhitelistRepository.WhitelistOwner owner : whitelistRepository.findOwners(name)) {
+            String uid = owner.playerUuid;
+            found.add((owner.qq == FoliaWhitelistRepository.ADMIN_SOURCE_QQ ? "管理员" : "QQ" + owner.qq)
+                    + (owner.frozen ? " (已冻结)" : "")
+                    + (uid != null && !uid.isEmpty() ? " (UUID:" + uid.substring(0, Math.min(8, uid.length())) + "...)" : ""));
         }
+        if (found.isEmpty()) event.replyAt("未找到 " + name + " 的白名单记录");
+        else event.replyAt("游戏ID " + name + " 的绑定信息:\n" + String.join("\n", found));
+        event.react(true);
     }
 
     private void showWhitelist(long targetQq, String label, OneBotEvent event) {
@@ -662,33 +641,22 @@ public class BotCommandHandler {
 
     private void handleBanList(OneBotEvent event) {
         try {
-            synchronized (storage) {
-                try (var ps = storage.getConnection().prepareStatement(
-                        "SELECT qq, reason, banned_at, expiry FROM qq_blacklist ORDER BY banned_at DESC LIMIT 50")) {
-                    try (var rs = ps.executeQuery()) {
-                        StringBuilder sb = new StringBuilder("封禁列表:\n");
-                        int count = 0;
-                        while (rs.next()) {
-                            long qq = rs.getLong("qq");
-                            String reason = rs.getString("reason");
-                            long expiry = rs.getLong("expiry");
-                            sb.append(++count).append(". QQ").append(qq);
-                            if (reason != null && !reason.isEmpty()) sb.append(" (").append(reason).append(")");
-                            if (expiry > 0 && expiry > System.currentTimeMillis()) {
-                                long remain = (expiry - System.currentTimeMillis()) / 1000;
-                                sb.append(" [剩余").append(formatDuration(remain)).append("]");
-                            } else if (expiry == 0) {
-                                sb.append(" [永久]");
-                            }
-                            sb.append("\n");
-                        }
-                        if (count == 0) sb.append("(无)");
-                        delayReply();
-                        event.reply(sb.toString());
-                        event.react(true);
-                    }
+            StringBuilder sb = new StringBuilder("封禁列表:\n");
+            int count = 0;
+            for (FoliaWhitelistRepository.BlacklistEntry entry : whitelistRepository.getBlacklistEntries(50)) {
+                sb.append(++count).append(". QQ").append(entry.qq);
+                if (entry.reason != null && !entry.reason.isEmpty()) sb.append(" (").append(entry.reason).append(")");
+                if (entry.expiry != null && entry.expiry > System.currentTimeMillis()) {
+                    sb.append(" [剩余").append(formatDuration((entry.expiry - System.currentTimeMillis()) / 1000)).append("]");
+                } else if (entry.expiry == null || entry.expiry == 0) {
+                    sb.append(" [永久]");
                 }
+                sb.append("\n");
             }
+            if (count == 0) sb.append("(无)");
+            delayReply();
+            event.reply(sb.toString());
+            event.react(true);
         } catch (Exception e) {
             logger.warning("[BotHandler] Ban list failed: " + e.getMessage());
             event.reply("查询失败");

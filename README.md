@@ -277,11 +277,25 @@ maintenance: false  # 维护模式开关
 
 ### 白名单
 
+LuoOS 的登录白名单统一由数据库 `qq_whitelist` 管理，QQ 机器人、管理员命令和登录拦截都通过同一个 `FoliaWhitelistRepository` 数据访问模块操作，功能模块不再直接执行白名单 SQL。
+
 ```yaml
-enableWhitelist: true  # 启用LuoOS白名单
+enableWhitelist: true  # 启用旧版 JSON 白名单兼容检查；数据库白名单始终由 qq_whitelist 管理
 ```
 
-命令：`/los whitelist add/remove/list <玩家>`
+管理员命令（OP 或拥有 `luoos.admin` 权限）：
+
+```text
+/los whitelist add <玩家>
+/los whitelist remove <玩家>
+/los whitelist list
+```
+
+- `add` 写入 `qq_whitelist`，来源标记为“管理员”，不需要 QQ 机器人。
+- `remove` 按玩家名移除数据库白名单记录。
+- `list` 显示数据库白名单、来源和冻结状态。
+- QQ 机器人添加的记录仍然使用 QQ 号作为来源。
+- 管理员添加的记录不会因为 QQ 退群事件被冻结。
 
 ### 封禁系统
 

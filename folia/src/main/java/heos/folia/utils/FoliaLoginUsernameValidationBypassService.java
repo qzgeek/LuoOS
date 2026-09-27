@@ -4,6 +4,7 @@ import heos.folia.storage.FoliaAccountBinding;
 import heos.folia.storage.FoliaBanData;
 import heos.folia.storage.FoliaStorage;
 import heos.folia.storage.FoliaWhitelistData;
+import heos.folia.storage.FoliaWhitelistRepository;
 import io.netty.channel.Channel;
 import io.netty.channel.ChannelDuplexHandler;
 import io.netty.channel.ChannelFuture;
@@ -42,17 +43,20 @@ public final class FoliaLoginUsernameValidationBypassService implements AutoClos
     private final FoliaWhitelistData whitelistData;
     private final FoliaAccountBinding accountBinding;
     private final FoliaStorage storage;
+    private final FoliaWhitelistRepository whitelistRepository;
     private final Set<Channel> serverChannels = Collections.newSetFromMap(new IdentityHashMap<>());
 
     public FoliaLoginUsernameValidationBypassService(Plugin plugin, FoliaBanData banData,
                                                       FoliaWhitelistData whitelistData,
                                                       FoliaAccountBinding accountBinding,
-                                                      FoliaStorage storage) {
+                                                      FoliaStorage storage,
+                                                      FoliaWhitelistRepository whitelistRepository) {
         this.plugin = plugin;
         this.banData = banData;
         this.whitelistData = whitelistData;
         this.accountBinding = accountBinding;
         this.storage = storage;
+        this.whitelistRepository = whitelistRepository;
     }
 
     public void install() {
@@ -206,43 +210,16 @@ public final class FoliaLoginUsernameValidationBypassService implements AutoClos
     }
 
     private boolean isInDbWhitelist(String username) {
-        try {
-            synchronized (storage) {
-                try (PreparedStatement ps = storage.getConnection().prepareStatement(
-                        "SELECT 1 FROM qq_whitelist WHERE LOWER(player_name) = ? AND (frozen = 0 OR frozen IS NULL)")) {
-                    ps.setString(1, username.toLowerCase());
-                    try (ResultSet rs = ps.executeQuery()) {
-                        return rs.next();
-                    }
-                }
-            }
-        } catch (Exception e) { return false; }
+        return whitelistRepository.isActiveWhitelist(username);
     }
 
     /** True if this player name exists in the DB whitelist but is frozen (退群/被踢). */
     private boolean isFrozenInDbWhitelist(String username) {
-        try {
-            synchronized (storage) {
-                try (PreparedStatement ps = storage.getConnection().prepareStatement(
-                        "SELECT 1 FROM qq_whitelist WHERE LOWER(player_name) = ? AND frozen = 1")) {
-                    ps.setString(1, username.toLowerCase());
-                    try (ResultSet rs = ps.executeQuery()) {
-                        return rs.next();
-                    }
-                }
-            }
-        } catch (Exception e) { return false; }
+        return whitelistRepository.isFrozenWhitelist(username);
     }
 
     private boolean dbWhitelistHasEntries() {
-        try {
-            synchronized (storage) {
-                try (var ps = storage.getConnection().prepareStatement("SELECT COUNT(*) FROM qq_whitelist");
-                     var rs = ps.executeQuery()) {
-                    return rs.next() && rs.getInt(1) > 0;
-                }
-            }
-        } catch (Exception e) { return false; }
+        return whitelistRepository.hasEntries();
     }
 
     private boolean rejectBan(String username, Channel ch) {
@@ -268,24 +245,7 @@ public final class FoliaLoginUsernameValidationBypassService implements AutoClos
 
     /** Returns ban reason if this player is bound to a blacklisted QQ, null otherwise. */
     private String dbBlacklistReason(String username) {
-        try {
-            synchronized (storage) {
-                try (PreparedStatement ps = storage.getConnection().prepareStatement(
-                        "SELECT b.reason, b.expiry FROM qq_blacklist b " +
-                        "INNER JOIN qq_whitelist w ON b.qq = w.qq " +
-                        "WHERE LOWER(w.player_name) = ? AND (b.expiry = 0 OR b.expiry > ?)")) {
-                    ps.setString(1, username.toLowerCase());
-                    ps.setLong(2, System.currentTimeMillis());
-                    try (ResultSet rs = ps.executeQuery()) {
-                        if (rs.next()) {
-                            String reason = rs.getString("reason");
-                            return reason != null && !reason.isEmpty() ? reason : "";
-                        }
-                    }
-                }
-            }
-        } catch (Exception e) {}
-        return null;
+        return whitelistRepository.blacklistReasonForPlayer(username);
     }
 
     // === Offline login ===

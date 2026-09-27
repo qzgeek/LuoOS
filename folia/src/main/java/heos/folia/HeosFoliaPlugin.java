@@ -18,6 +18,7 @@ import heos.folia.storage.FoliaAccountBinding;
 import heos.folia.storage.FoliaBanData;
 import heos.folia.storage.FoliaStorage;
 import heos.folia.storage.FoliaWhitelistData;
+import heos.folia.storage.FoliaWhitelistRepository;
 import heos.folia.utils.FoliaLoginUsernameValidationBypassService;
 import heos.folia.utils.FoliaNameResolver;
 import heos.folia.utils.FoliaTpsDisplayService;
@@ -32,6 +33,7 @@ public final class HeosFoliaPlugin extends JavaPlugin {
     private FoliaStorage storage;
     private FoliaBanData banData;
     private FoliaWhitelistData whitelistData;
+    private FoliaWhitelistRepository whitelistRepository;
     private FoliaAccountBinding accountBinding;
     private FoliaNameResolver nameResolver;
     private FoliaTpsDisplayService tpsDisplayService;
@@ -66,6 +68,7 @@ public final class HeosFoliaPlugin extends JavaPlugin {
 
         this.banData = FoliaBanData.load(getDataFolder().toPath(), getLogger());
         this.whitelistData = FoliaWhitelistData.load(getDataFolder().toPath(), getLogger());
+        this.whitelistRepository = new FoliaWhitelistRepository(storage, getLogger());
         this.nameResolver = new FoliaNameResolver(storage);
         this.accountBinding = new FoliaAccountBinding(storage, getLogger());
         this.tpsDisplayService = new FoliaTpsDisplayService(this);
@@ -90,12 +93,12 @@ public final class HeosFoliaPlugin extends JavaPlugin {
         // Resource world manager
         this.resourceWorldManager = new ResourceWorldManager(this);
 
-        FoliaAdminCommands adminCommands = new FoliaAdminCommands(this, storage, whitelistData,
+        FoliaAdminCommands adminCommands = new FoliaAdminCommands(this, storage, whitelistData, whitelistRepository,
                 migrationCommands, authService, banCommands, bindCommands, resourceWorldManager, statsTracker);
         getServer().getPluginManager().registerEvents(
                 new FoliaCommandInterceptor(this, authService, banCommands), this);
         getServer().getPluginManager().registerEvents(
-                new FoliaAuthListener(this, authService, banData, whitelistData, storage), this);
+                new FoliaAuthListener(this, authService, banData, whitelistData, storage, whitelistRepository), this);
         registerCommands(banCommands, adminCommands);
 
         if (isRecipeViewerSyncEnabled()) {
@@ -103,7 +106,7 @@ public final class HeosFoliaPlugin extends JavaPlugin {
         }
 
         this.bypassService = new FoliaLoginUsernameValidationBypassService(
-                this, banData, whitelistData, accountBinding, storage);
+                this, banData, whitelistData, accountBinding, storage, whitelistRepository);
         bypassService.install();
 
         // OneBot QQ bot
@@ -131,10 +134,10 @@ public final class HeosFoliaPlugin extends JavaPlugin {
                     mcDisplayIp, getDataFolder(), getConfig().getInt("bot.motd_bg_mask_alpha", 140));
             this.statusService = statusService;
 
-            BotDb botDb = new BotDb(getLogger(), storage);
+            BotDb botDb = new BotDb(getLogger(), whitelistRepository);
             try {
                 BotCommandHandler botHandler = new BotCommandHandler(
-                        getLogger(), botDb, storage, statusService,
+                        getLogger(), botDb, storage, whitelistRepository, statusService,
                         maxPerQq, idChars, maxIdLen, groups,
                         statusTrigger, rateMax, rateWindow,
                         delayMin, delayMax);

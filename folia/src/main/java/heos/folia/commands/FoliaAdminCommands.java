@@ -7,6 +7,7 @@ import heos.folia.utils.PlayerStatsTracker;
 import heos.folia.storage.FoliaPlayerData;
 import heos.folia.storage.FoliaStorage;
 import heos.folia.storage.FoliaWhitelistData;
+import heos.folia.storage.FoliaWhitelistRepository;
 import heos.folia.event.FoliaAuthService;
 import org.bukkit.Bukkit;
 import org.bukkit.ChatColor;
@@ -26,6 +27,7 @@ import java.util.UUID;
 public final class FoliaAdminCommands implements CommandExecutor, TabCompleter {
     private final FoliaStorage storage;
     private final FoliaWhitelistData whitelistData;
+    private final FoliaWhitelistRepository whitelistRepository;
     private final FoliaMigrationCommands migrationCommands;
     private final org.bukkit.plugin.Plugin plugin;
     private final FoliaAuthService authService;
@@ -37,6 +39,7 @@ public final class FoliaAdminCommands implements CommandExecutor, TabCompleter {
 
     public FoliaAdminCommands(org.bukkit.plugin.Plugin plugin, FoliaStorage storage,
                               FoliaWhitelistData whitelistData,
+                              FoliaWhitelistRepository whitelistRepository,
                               FoliaMigrationCommands migrationCommands,
                               FoliaAuthService authService,
                               FoliaBanCommands banCommands,
@@ -46,6 +49,7 @@ public final class FoliaAdminCommands implements CommandExecutor, TabCompleter {
         this.plugin = plugin;
         this.storage = storage;
         this.whitelistData = whitelistData;
+        this.whitelistRepository = whitelistRepository;
         this.migrationCommands = migrationCommands;
         this.authService = authService;
         this.banCommands = banCommands;
@@ -338,18 +342,14 @@ public final class FoliaAdminCommands implements CommandExecutor, TabCompleter {
                     sender.sendMessage(ChatColor.RED + "Usage: /los whitelist add <player>");
                     return true;
                 }
-                // Try resolve to UUID for precise whitelisting
+                // The database repository is the single source of truth for login whitelist entries.
                 FoliaPlayerData data = resolvePlayer(args[2], sender);
-                if (data != null && data.uuid != null) {
-                    if (whitelistData.add(data.uuid)) {
-                        sender.sendMessage(ChatColor.GREEN + "Added " + data.effectiveDisplayName() + " (UUID) to whitelist");
-                        return true;
-                    }
-                }
-                if (whitelistData.add(args[2])) {
-                    sender.sendMessage(ChatColor.GREEN + "Added " + args[2] + " to whitelist");
+                String name = data == null ? args[2] : data.username;
+                String uuid = data == null || data.uuid == null ? null : data.uuid.toString();
+                if (whitelistRepository.addAdminWhitelist(name, uuid)) {
+                    sender.sendMessage(ChatColor.GREEN + "已将 " + name + " 加入数据库白名单（管理员）");
                 } else {
-                    sender.sendMessage(ChatColor.RED + "Player is already in whitelist: " + args[2]);
+                    sender.sendMessage(ChatColor.RED + "玩家已在数据库白名单中，或白名单写入失败：" + name);
                 }
                 return true;
             }
@@ -358,33 +358,21 @@ public final class FoliaAdminCommands implements CommandExecutor, TabCompleter {
                     sender.sendMessage(ChatColor.RED + "Usage: /los whitelist remove <player>");
                     return true;
                 }
-                FoliaPlayerData data = resolvePlayer(args[2], sender);
-                boolean removed = false;
-                if (data != null && data.uuid != null) {
-                    removed = whitelistData.removeByUuid(data.uuid);
-                }
-                if (!removed) {
-                    removed = whitelistData.remove(args[2]);
-                }
+                boolean removed = whitelistRepository.removeAnyWhitelist(args[2]);
                 if (removed) {
-                    sender.sendMessage(ChatColor.GREEN + "Removed " + args[2] + " from whitelist");
+                    sender.sendMessage(ChatColor.GREEN + "已从数据库白名单移除：" + args[2]);
                 } else {
-                    sender.sendMessage(ChatColor.RED + "Player is not in whitelist: " + args[2]);
+                    sender.sendMessage(ChatColor.RED + "数据库白名单中不存在：" + args[2]);
                 }
                 return true;
             }
             case "list" -> {
-                sender.sendMessage(ChatColor.YELLOW + "Whitelist size: " + whitelistData.usernames.size()
-                        + (whitelistData.uuids != null ? " + " + whitelistData.uuids.size() + " UUIDs" : ""));
-                if (!whitelistData.usernames.isEmpty()) {
-                    sender.sendMessage(ChatColor.GRAY + "Names: " + String.join(", ", whitelistData.usernames));
-                }
-                if (whitelistData.uuids != null && !whitelistData.uuids.isEmpty()) {
-                    List<String> shortUuids = new ArrayList<>();
-                    for (String id : whitelistData.uuids) {
-                        shortUuids.add(id.substring(0, Math.min(id.length(), 8)));
-                    }
-                    sender.sendMessage(ChatColor.GRAY + "UUIDs: " + String.join(", ", shortUuids));
+                List<FoliaWhitelistRepository.WhitelistEntry> entries = whitelistRepository.getAllWhitelistEntries();
+                sender.sendMessage(ChatColor.YELLOW + "数据库白名单数量：" + entries.size());
+                for (FoliaWhitelistRepository.WhitelistEntry entry : entries) {
+                    String source = entry.qq == FoliaWhitelistRepository.ADMIN_SOURCE_QQ ? "管理员" : "QQ" + entry.qq;
+                    sender.sendMessage(ChatColor.GRAY + "- " + entry.playerName + " [" + source + "]"
+                            + (entry.frozen ? " [已冻结]" : ""));
                 }
                 return true;
             }
