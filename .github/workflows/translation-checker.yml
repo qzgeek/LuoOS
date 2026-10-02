@@ -3,7 +3,11 @@ name: Check translations
 on:
   push:
     paths:
-      - "src/main/resources/data/easyauth/lang/**"
+      - "folia/src/main/resources/data/heos/lang/**"
+      - ".github/translation-checker/**"
+  pull_request:
+    paths:
+      - "folia/src/main/resources/data/heos/lang/**"
       - ".github/translation-checker/**"
 
 permissions:
