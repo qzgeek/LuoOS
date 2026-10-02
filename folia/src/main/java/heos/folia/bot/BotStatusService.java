@@ -190,6 +190,7 @@ public class BotStatusService {
     private LocalPingResult pingLocal() {
         try (java.net.Socket socket = new java.net.Socket()) {
             socket.connect(new java.net.InetSocketAddress(mcHost, mcPort), 3000);
+            socket.setSoTimeout(3000);
             java.io.OutputStream out = socket.getOutputStream();
             java.io.DataInputStream in = new java.io.DataInputStream(socket.getInputStream());
 
@@ -213,6 +214,7 @@ public class BotStatusService {
             int packetId = readVarInt(in);
             if (packetId != 0x00) return null;
             int jsonLen = readVarInt(in);
+            if (jsonLen <= 0 || jsonLen > 1_048_576 || jsonLen > len) return null;
             byte[] jsonBytes = new byte[jsonLen];
             in.readFully(jsonBytes);
             String json = new String(jsonBytes, java.nio.charset.StandardCharsets.UTF_8);

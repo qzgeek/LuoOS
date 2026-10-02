@@ -121,7 +121,7 @@ public class OneBotServer extends WebSocketServer {
                 JsonObject d = new JsonObject(); d.addProperty("online",true); d.addProperty("good",true); resp.add("data",d);
             }
             case "get_version_info" -> {
-                JsonObject d = new JsonObject(); d.addProperty("app_name","LuoOS"); d.addProperty("app_version","0.09"); d.addProperty("protocol_version","v11"); resp.add("data",d);
+                JsonObject d = new JsonObject(); d.addProperty("app_name","LuoOS"); d.addProperty("app_version","0.10"); d.addProperty("protocol_version","v11"); resp.add("data",d);
             }
             default -> { resp.addProperty("status","failed"); resp.addProperty("retcode",1404); resp.addProperty("msg","unsupported: "+action); }
         }

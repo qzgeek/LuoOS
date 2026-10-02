@@ -1,165 +1,205 @@
 # =============================================================================
 #   LuoOS 插件配置文件
-#   项目地址: https://github.com/qzgeek/heos-public
-#   作者: chara201x, qzgeek (黔中极客)
+#   项目地址: https://github.com/qzgeek/LuoOS
+#   作者: chara201x, qzgeek (黔中极客), CatXiaolan
 # =============================================================================
 
-# =============================================================================
-# 登录认证系统
-# =============================================================================
+# 插件基础设置
+setting:
+  # 语言文件。插件消息和提示将使用对应语言。
+  # 目前支持: zh_cn（简体中文）
+  language: zh_cn
 
-# 是否启用登录/注册认证。关闭后所有玩家无需密码即可进入游戏。
-# 警告：关闭后离线玩家账号可被同名冒充，强烈建议保持开启。
-# 合法值: true（开启） / false（关闭）
-enableAuthentication: true
+  # 插件版本（禁止修改）
+  version: 1.0
 
-# 语言文件。插件消息和提示将使用对应语言。
-# 目前支持: zh_cn（简体中文） / en_us（English）
-language: zh_cn
+  # 调试模式（输出详细调试日志）
+  debug: false
 
-# 是否允许离线（非正版）玩家进入在线模式服务器。
-# 开启后，非标准纯英文名的玩家将绕过 Mojang 正版验证。
-# 合法值: true（允许） / false（仅正版）
-allowOfflinePlayers: true
+# 登录认证功能
+account:
+  # 登录认证总开关
+  enable: false
 
-# 是否允许离线玩家名称使用扩展字符（中文、特殊符号等）。
-# 关闭后仅允许 [a-zA-Z0-9_+-.] 字符的用户名。
-# 合法值: true（允许） / false（仅ASCII字符）
-allowMoreOfflineUsernameCharacters: true
+  # 是否启用登录/注册认证。关闭后所有玩家无需密码即可进入游戏。
+  # 警告：关闭后离线玩家账号可被同名冒充，强烈建议保持开启。
+  enableAuthentication: true
 
-# 是否区分同名正版和离线玩家的登录数据。
-# 开启后，同名正版和离线玩家拥有独立的账号数据（按UUID区分）。
-# 合法值: true（分离存储） / false（合并存储）
-separateOnlineOfflineAccounts: true
+  # 是否允许离线玩家名称使用扩展字符（中文、特殊符号等）。
+  # 关闭后仅允许 [a-zA-Z0-9_+-.] 字符的用户名。
+  # 合法值: true（允许） / false（仅ASCII字符）
+  allowMoreOfflineUsernameCharacters: true
 
-# 是否拦截无命名空间前缀的 login/register/changepassword 等命令。
-# 开启后，玩家直接输入 /login 等命令会被拦截，需使用 /los login。
-# 合法值: true（拦截） / false（不拦截）
-enableUnprefixedCommandHijack: true
+  # 是否允许离线（非正版）玩家进入在线模式服务器。
+  # 开启后，非标准纯英文名的玩家将绕过 Mojang 正版验证。
+  # 合法值: true（允许） / false（仅正版）
+  allowOfflinePlayers: true
 
-# 玩家进入服务器后必须在多少秒内完成登录/注册，超时将被踢出。
-# 合法值: 1 - 3600（秒）
-loginTimeout: 60
+  # 是否区分同名正版和离线玩家的登录数据。
+  # 开启后，同名正版和离线玩家拥有独立的账号数据（按UUID区分）。
+  # 合法值: true（分离存储） / false（合并存储）
+  separateOnlineOfflineAccounts: true
 
-# 未登录玩家每隔多少秒收到一次登录/注册提醒。
-# 合法值: 1 - 600（秒）
-loginReminderSeconds: 10
+  # 是否拦截无命名空间前缀的 login/register/changepassword 等命令。
+  # 开启后，玩家直接输入 /login 等命令会被拦截，需使用 /los login。
+  # 合法值: true（拦截） / false（不拦截）
+  enableUnprefixedCommandHijack: false
 
-# 注册密码允许的最短长度。
-# 合法值: 1 - 64
-minPasswordLength: 4
+  # 玩家进入服务器后必须在多少秒内完成登录/注册，超时将被踢出。
+  # 合法值: 1 - 3600（秒）
+  loginTimeout: 120
 
-# 注册密码允许的最长长度。
-# 合法值: 4 - 256
-maxPasswordLength: 32
+  # 未登录玩家每隔多少秒收到一次登录/注册提醒。
+  # 合法值: 1 - 600（秒）
+  loginReminderSeconds: 10
 
-# 以下为登录绕过配置。符合规则的玩家无需登录即可进入游戏。
-# 格式：每行一个IP地址（前面加两个空格和短横线）
-#loginBypassIps: []
-#  - "127.0.0.1"
-#  - "192.168.1.100"
+  # 注册密码允许的最短长度。
+  # 合法值: 1 - 64
+  minPasswordLength: 4
 
-# 无需登录的玩家名称列表。前缀匹配（如"BOT_"可匹配所有假人）。
-# 格式：每行一个名称或前缀（前面加两个空格和短横线）
-#loginBypassNames: []
-#  - "BOT_"
-#  - "假人_"
+  # 注册密码允许的最长长度。
+  # 合法值: 4 - 256
+  maxPasswordLength: 32
 
-# =============================================================================
-# 账号绑定系统
-# =============================================================================
+  # 无需登录的玩家名称列表。前缀匹配（如"BOT_"可匹配所有假人）。
+  # 格式：每行一个名称或前缀（前面加两个空格和短横线）
+  loginBypassNames:
+    - "BOT_"
+    - "假人_"
+    - '[Bot]'
 
-# 是否启用账号绑定功能（/los bind）。
-# 允许多个小号绑定到一个主账号，共享主账号的游戏数据。
-# 合法值: true（启用） / false（禁用）
-enableAccountBinding: true
-
-# 绑定数据存储方式。
-# sqlite：本地单文件数据库，无需额外配置
-# mysql：需要配置下方的MySQL连接信息
-# 合法值: sqlite / mysql
-bindingStorage: sqlite
-
-# MySQL 连接配置（仅 bindingStorage 设为 mysql 时需要）。
-# 格式：
-#   url: jdbc:mysql://主机地址:端口/数据库名
-#   user: 数据库用户名
-#   password: 数据库密码
-#mysql:
-#  url: jdbc:mysql://localhost:3306/luoos
-#  user: luoos
-#  password: 请修改此密码
-
-# =============================================================================
-# QQ机器人（OneBot协议）
-# =============================================================================
-
-# 插件内嵌了 OneBot WebSocket 服务器，用于对接 QQ 机器人框架。
-# 目前支持的QQ框架：NapCat、LLOneBot 等。
-bot:
-  # 是否启用QQ机器人模块。
-  # 合法值: true（启用） / false（禁用）
-  enabled: false
-
-  # WebSocket 服务器监听地址和端口。
-  # host: 监听地址，0.0.0.0 表示所有网络接口
-  # port: 监听端口，需与QQ框架配置中的反向WebSocket地址一致
-  host: 0.0.0.0
-  port: 10100
-
-  # 鉴权令牌。需与QQ框架配置中的 access_token 完全一致。
-  # 留空则不验证令牌（不推荐）。
-  access_token: ""
-
-  # 允许响应命令的QQ群聊列表。
-  # 格式：[群号1, 群号2, ...]
-  # 设为空数组 [] 表示允许所有群聊（调试用，不推荐生产环境使用）。
-  qq_groups: [1054140738]
-
-  # 每个QQ号最多可申请的白名单数量。
-  # 合法值: 1 - 99
-  max_per_qq: 3
+  # 无需登录的IP地址列表（前缀匹配）。
+  # 格式：每行一个IP（前面加两个空格和短横线）
+  loginBypassIps:
+    - "127.0.0.1"
 
   # 允许的玩家ID字符集（正则表达式）。
   # 用于白名单申请时校验玩家ID。
-  allowed_id_chars: "a-zA-Z0-9_-."
+  allowed_id_chars: a-zA-Z0-9_-.
 
   # 玩家ID允许的最大长度。
   # 合法值: 3 - 32
   max_id_length: 16
 
-  # 触发服务器状态卡片的命令词。
-  # 玩家在群内发送此文字时，机器人返回状态卡片图片。
-  status_trigger: "服务器还活着吗"
+# 玩家账号绑定
+account-binder:
+  # 是否启用账号绑定功能（/los bind）。
+  # 允许多个小号绑定到一个主账号，共享主账号的游戏数据。
+  # 合法值: true（启用） / false（禁用）
+  enable: true
 
-  # 群聊命令频率限制。
-  # rate_limit_max：每个时间窗口内允许的最大命令数
-  # rate_limit_window：时间窗口长度（秒）
-  # 管理员不受频率限制。
-  rate_limit_max: 5
-  rate_limit_window: 60
+  # 绑定数据存储方式。
+  # sqlite：本地单文件数据库，无需额外配置
+  # mysql：需要配置下方的MySQL连接信息
+  # 合法值: sqlite / mysql
+  bindingStorage: sqlite
 
-  # 机器人回复延迟范围（毫秒）。
-  # 在范围内随机延迟后再回复，模拟真人打字。
-  # reply_delay_min_ms：最小延迟
-  # reply_delay_max_ms：最大延迟
-  reply_delay_min_ms: 1000
-  reply_delay_max_ms: 2000
+  # MySQL 连接配置（仅 bindingStorage 设为 mysql 时需要）。
+  # 格式：
+  #   url: jdbc:mysql://主机地址:端口/数据库名
+  #   user: 数据库用户名
+  #   password: 数据库密码
+  mysql:
+    url: ""
+    user: ""
+    password: ""
 
-  # 是否开启调试日志。
-  # 开启后会在控制台输出 WebSocket 收发内容和命令处理详情。
-  # 合法值: true（开启） / false（关闭）
-  debug_log: false
+# QQ机器人功能
+qq_bot:
+  # QQ机器人功能总开关
+  enable: false
 
-  # 状态卡片中显示的服务器名称。
-  mc_display_name: "LuoOS服务器"
+  # 私人QQ机器人（自己的QQ号搭建的机器人）
+  private-bot:
+    # 是否启用
+    enable: false
 
-  # 状态卡片中显示的服务器简介。
-  mc_description: "欢迎来到LuoOS"
+    # 插件内嵌了 OneBot WebSocket 服务器，用于对接 QQ 机器人框架。本插件是WS服务器，机器人需使用WS正向连接到本插件
+    # 支持的框架：NapCat
+    host: 0.0.0.0
+    port: 35013
 
-  # 状态卡片中显示的连接地址。
-  mc_display_ip: "127.0.0.1:25565"
+    # 鉴权令牌。需与QQ框架配置中的 access_token 完全一致。
+    # 留空则不验证令牌（不推荐）。
+    access_token: ""
 
+    # 允许响应命令的QQ群聊列表。
+    # 格式：[群号1, 群号2, ...]
+    # 设为空数组 [] 表示允许所有群聊（调试用，不推荐生产环境使用）。
+    qq_groups: []
+
+    # 每个QQ号最多可申请的白名单数量。
+    # 合法值: 1 - 99
+    max_per_qq: 3
+
+    # QQ群中发送状态卡片所需的的命令
+    card-cmd:
+      - "服务器还活着吗"
+      - "状态"
+      - "服务器状态"
+      - "status"
+      - "state"
+
+    # 速率限制窗口（秒）
+    rate-limit-window: 60
+    # 速率限制（次），即窗口时间内最多发送多少次消息
+    rate-limit-max: 10
+    # 随机回复最小延迟（毫秒）
+    reply-delay-min-ms: 500
+    # 随机回复最大延迟（毫秒）
+    reply-delay-max-ms: 2000
+
+  # 官方QQ机器人
+  official-bot:
+    # 是否启用
+    enable: false
+
+    # 请前往QQ开发中心获取并填入下列信息
+    app_id: ""
+    app_secret: ""
+
+    # QQ群中发送状态卡片所需的命令（官方通道独立配置）
+    card-cmd:
+      - "服务器还活着吗"
+      - "状态"
+      - "服务器状态"
+      - "status"
+      - "state"
+
+    # 验证码位数，推荐至少6位。
+    code_digits: 6
+    # 验证码有效时间（分钟）；验证通过前不会建立正式身份映射。
+    code_expire_minutes: 10
+    # 官方API根地址，通常无需修改。
+    api_base: "https://api.bot.qq.com"
+    # 访问凭证服务地址，通常无需修改。
+    token_base: "https://api.bot.qq.com"
+    # 留空时自动发现网关；仅特殊环境手动指定 wss 地址。
+    gateway: ""
+
+    # 官Q为验证绑定者QQ号，必须配置发件邮箱
+    smtp:
+      host: "smtp.qq.com"
+      port: 465
+      username: ""
+      password: ""
+      from: ""
+      starttls: false
+
+# 状态卡片
+status-card:
+  # 是否启用
+  enable: true
+  # 服务器IP
+  server-host: 127.0.0.1
+  # 服务器端口
+  server-port: 25565
+  # 显示服务器名称
+  server-display-name: "我的LuoOS服务器"
+  # 显示的服务器介绍
+  server-description: "这里是服务器的简介"
+  # 显示的服务器地址
+  server-display-ip: "mc.example.top"
   # 状态卡片背景遮罩透明度（0-255）。
   # 数值越低背景越透明，越高越暗。
   motd_bg_mask_alpha: 140
@@ -192,6 +232,7 @@ enableRecipeViewerSync: true
 
 # 是否启用 LuoOS 自带的白名单检查功能。
 # 与QQ机器人的白名单（qq_whitelist表）配合使用。
+# 注意：qq_whitelist 表一旦存在记录，白名单即视为启用。
 # 合法值: true（启用） / false（禁用）
 enableWhitelist: false
 
@@ -234,6 +275,14 @@ usernameLoginFailureLimit: 5
 # 用户名被失败锁定后多少秒自动解锁。
 # 合法值: 10 - 3600
 usernameLoginFailureLockSeconds: 30
+
+# 同一IP连续登录失败多少次后临时锁定。
+# 合法值: 3 - 100
+ipLoginFailureLimit: 10
+
+# IP被失败锁定后多少秒自动解锁。
+# 合法值: 10 - 3600
+ipLoginFailureLockSeconds: 60
 
 # =============================================================================
 # 服务器维护模式

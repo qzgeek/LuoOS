@@ -10,6 +10,8 @@ import heos.folia.bot.OneBotServer;
 import heos.folia.bot.BotCommandHandler;
 import heos.folia.bot.BotStatusService;
 import heos.folia.bot.BotDb;
+import heos.folia.bot.OfficialQQBot;
+import heos.folia.bot.SmtpCodeService;
 import heos.folia.event.FoliaAuthListener;
 import heos.folia.event.FoliaAuthService;
 import heos.folia.event.FoliaCommandInterceptor;
@@ -28,6 +30,8 @@ import org.bukkit.Bukkit;
 import org.bukkit.command.PluginCommand;
 import org.bukkit.plugin.java.JavaPlugin;
 
+import java.util.Map;
+
 public final class HeosFoliaPlugin extends JavaPlugin {
     private FoliaAuthService authService;
     private FoliaStorage storage;
@@ -40,14 +44,118 @@ public final class HeosFoliaPlugin extends JavaPlugin {
     private FoliaRecipeSyncService recipeSyncService;
     private FoliaLoginUsernameValidationBypassService bypassService;
     private OneBotServer botServer;
+    private OfficialQQBot officialQQBot;
     public BotStatusService statusService;
     private ResourceWorldManager resourceWorldManager;
     public OneBotServer getBotServer() { return botServer; }
     PlayerStatsTracker statsTracker;
 
+    /**
+     * 状态卡片触发词。传统机器人与官方机器人各自独立配置：
+     *   qq_bot.private-bot.card-cmd / qq_bot.official-bot.card-cmd
+     * 兼容旧键 bot.card-cmd 与 bot.status_trigger。
+     */
+    private String statusTriggerFor(String channel) {
+        java.util.List<String> commands = getConfig().getStringList("qq_bot." + channel + ".card-cmd");
+        if (commands == null || commands.isEmpty()) commands = getConfig().getStringList("bot." + channel + ".card-cmd");
+        if (commands == null || commands.isEmpty()) commands = getConfig().getStringList("bot.card-cmd");
+        if (commands != null && !commands.isEmpty()) {
+            String joined = String.join("|", commands);
+            getLogger().info("状态卡片触发词[" + channel + "]：" + joined);
+            return joined;
+        }
+        String legacy = getConfig().getString("bot.status_trigger", "");
+        return legacy.isBlank() ? "服务器还活着吗" : legacy;
+    }
+
+    /**
+     * 新版配置把设置分组到 setting/account/account-binder/qq_bot/status-card 下，
+     * 而插件内部仍按旧扁平键读取。这里为新旧两组键建立别名，
+     * 两种写法都可用，避免升级后出现“键读不到、功能静默失效”。
+     */
+    private static final Map<String, String> CONFIG_ALIASES = createConfigAliases();
+
+    private static Map<String, String> createConfigAliases() {
+        Map<String, String> a = new java.util.LinkedHashMap<>();
+        a.put("language", "setting.language");
+        a.put("enableAuthentication", "account.enableAuthentication");
+        a.put("allowMoreOfflineUsernameCharacters", "account.allowMoreOfflineUsernameCharacters");
+        a.put("allowOfflinePlayers", "account.allowOfflinePlayers");
+        a.put("separateOnlineOfflineAccounts", "account.separateOnlineOfflineAccounts");
+        a.put("enableUnprefixedCommandHijack", "account.enableUnprefixedCommandHijack");
+        a.put("loginTimeout", "account.loginTimeout");
+        a.put("loginReminderSeconds", "account.loginReminderSeconds");
+        a.put("minPasswordLength", "account.minPasswordLength");
+        a.put("maxPasswordLength", "account.maxPasswordLength");
+        a.put("loginBypassNames", "account.loginBypassNames");
+        a.put("loginBypassIps", "account.loginBypassIps");
+        a.put("allowed_id_chars", "account.allowed_id_chars");
+        a.put("max_id_length", "account.max_id_length");
+        a.put("enableWhitelist", "account.enableWhitelist");
+        a.put("enableAccountBinding", "account-binder.enable");
+        a.put("bindingStorage", "account-binder.bindingStorage");
+        a.put("mysql.url", "account-binder.mysql.url");
+        a.put("mysql.user", "account-binder.mysql.user");
+        a.put("mysql.password", "account-binder.mysql.password");
+        a.put("bot.enabled", "qq_bot.enable");
+        a.put("bot.host", "qq_bot.private-bot.host");
+        a.put("bot.port", "qq_bot.private-bot.port");
+        a.put("bot.access_token", "qq_bot.private-bot.access_token");
+        a.put("bot.qq_groups", "qq_bot.private-bot.qq_groups");
+        a.put("bot.max_per_qq", "qq_bot.private-bot.max_per_qq");
+        a.put("bot.allowed_id_chars", "account.allowed_id_chars");
+        a.put("bot.max_id_length", "account.max_id_length");
+        a.put("bot.status_trigger", "qq_bot.private-bot.status_trigger");
+        a.put("bot.rate_limit_max", "qq_bot.private-bot.rate-limit-max");
+        a.put("bot.rate_limit_window", "qq_bot.private-bot.rate-limit-window");
+        a.put("bot.reply_delay_min_ms", "qq_bot.private-bot.reply-delay-min-ms");
+        a.put("bot.reply_delay_max_ms", "qq_bot.private-bot.reply-delay-max-ms");
+        a.put("bot.debug_log", "qq_bot.private-bot.debug_log");
+        a.put("bot.mc_host", "status-card.server-host");
+        a.put("bot.mc_port", "status-card.server-port");
+        a.put("bot.mc_display_name", "status-card.server-display-name");
+        a.put("bot.mc_description", "status-card.server-description");
+        a.put("bot.mc_display_ip", "status-card.server-display-ip");
+        a.put("bot.motd_bg_mask_alpha", "status-card.motd_bg_mask_alpha");
+        a.put("official_qq.enabled", "qq_bot.official-bot.enable");
+        a.put("official_qq.app_id", "qq_bot.official-bot.app_id");
+        a.put("official_qq.app_secret", "qq_bot.official-bot.app_secret");
+        a.put("official_qq.groups", "qq_bot.official-bot.groups");
+        a.put("official_qq.code_digits", "qq_bot.official-bot.code_digits");
+        a.put("official_qq.code_expire_minutes", "qq_bot.official-bot.code_expire_minutes");
+        a.put("official_qq.api_base", "qq_bot.official-bot.api_base");
+        a.put("official_qq.token_base", "qq_bot.official-bot.token_base");
+        a.put("official_qq.gateway", "qq_bot.official-bot.gateway");
+        a.put("official_qq.debug_log", "qq_bot.private-bot.debug_log");
+        a.put("bot.official_card-cmd", "qq_bot.official-bot.card-cmd");
+        a.put("official_qq.smtp.host", "qq_bot.official-bot.smtp.host");
+        a.put("official_qq.smtp.port", "qq_bot.official-bot.smtp.port");
+        a.put("official_qq.smtp.username", "qq_bot.official-bot.smtp.username");
+        a.put("official_qq.smtp.password", "qq_bot.official-bot.smtp.password");
+        a.put("official_qq.smtp.from", "qq_bot.official-bot.smtp.from");
+        a.put("official_qq.smtp.starttls", "qq_bot.official-bot.smtp.starttls");
+        return java.util.Collections.unmodifiableMap(a);
+    }
+
+    /**
+     * 只在内存中互相补齐别名键，不写回文件，因此不覆盖用户已有配置。
+     */
+    private void applyConfigAliases() {
+        for (Map.Entry<String, String> alias : CONFIG_ALIASES.entrySet()) {
+            String flat = alias.getKey(), grouped = alias.getValue();
+            String source = getConfig().contains(grouped) ? grouped
+                    : getConfig().contains(flat) ? flat : null;
+            if (source == null) continue;
+            if (!getConfig().contains(flat)) getConfig().set(flat, getConfig().get(source));
+            if (!getConfig().contains(grouped)) getConfig().set(grouped, getConfig().get(source));
+        }
+        if (getConfig().contains("qq_bot")) getLogger().info("配置：已识别新版分组结构（旧键名兼容可用）。");
+    }
+
     @Override
     public void onEnable() {
         saveDefaultConfig();
+        applyConfigAliases();
 
         heos.folia.utils.FoliaMessages.init(this);
         heos.folia.utils.FoliaLogFilterService.installConfiguredFilters(this);
@@ -119,7 +227,7 @@ public final class HeosFoliaPlugin extends JavaPlugin {
             String idChars = getConfig().getString("bot.allowed_id_chars", "a-zA-Z0-9_-");
             int maxIdLen = getConfig().getInt("bot.max_id_length", 16);
 
-            String statusTrigger = getConfig().getString("bot.status_trigger", "服务器还活着吗");
+            String statusTrigger = statusTriggerFor("private-bot");
             int rateMax = getConfig().getInt("bot.rate_limit_max", 3);
             int rateWindow = getConfig().getInt("bot.rate_limit_window", 60);
             int delayMin = getConfig().getInt("bot.reply_delay_min_ms", 1000);
@@ -146,6 +254,13 @@ public final class HeosFoliaPlugin extends JavaPlugin {
                 boolean botDebug = getConfig().getBoolean("bot.debug_log", false);
                 botServer.setDebugLog(botDebug);
                 botHandler.setDebugLog(botDebug);
+                botHandler.setMailService(new SmtpCodeService(
+                        getConfig().getString("official_qq.smtp.host", "smtp.qq.com"),
+                        getConfig().getInt("official_qq.smtp.port", 587),
+                        getConfig().getString("official_qq.smtp.username", ""),
+                        getConfig().getString("official_qq.smtp.password", ""),
+                        getConfig().getString("official_qq.smtp.from", getConfig().getString("official_qq.smtp.username", "")),
+                        getConfig().getBoolean("official_qq.smtp.starttls", true)));
                 botServer.setEventHandler(event -> botHandler.handle(event));
                 new Thread(botServer::startServer, "LuoOS-Bot").start();
                 getLogger().info("OneBot server started on ws://" + botHost + ":" + botPort);
@@ -153,6 +268,45 @@ public final class HeosFoliaPlugin extends JavaPlugin {
                 getLogger().severe("Failed to start OneBot server: " + e.getMessage());
                 e.printStackTrace();
             }
+        }
+
+        if (getConfig().getBoolean("official_qq.enabled", false)) {
+            try {
+                String smtpUser = getConfig().getString("official_qq.smtp.username", "");
+                SmtpCodeService smtp = new SmtpCodeService(
+                        getConfig().getString("official_qq.smtp.host", "smtp.qq.com"),
+                        getConfig().getInt("official_qq.smtp.port", 587), smtpUser,
+                        getConfig().getString("official_qq.smtp.password", ""),
+                        getConfig().getString("official_qq.smtp.from", smtpUser),
+                        getConfig().getBoolean("official_qq.smtp.starttls", true));
+                if (statusService == null) {
+                    String mcHost = getConfig().getString("bot.mc_host", "127.0.0.1");
+                    int mcPort = getConfig().getInt("bot.mc_port", 25565);
+                    statusService = new BotStatusService(getLogger(), mcHost, mcPort,
+                            getConfig().getString("bot.mc_display_name", "LuoOS服务器"),
+                            getConfig().getString("bot.mc_description", "欢迎来到LuoOS"),
+                            getConfig().getString("bot.mc_display_ip", mcHost + ":" + mcPort),
+                            getDataFolder(), getConfig().getInt("bot.motd_bg_mask_alpha", 140));
+                }
+                BotDb botDb = new BotDb(getLogger(), whitelistRepository);
+                BotCommandHandler handler = new BotCommandHandler(getLogger(), botDb, storage, whitelistRepository,
+                        statusService, getConfig().getInt("bot.max_per_qq", 3), getConfig().getString("bot.allowed_id_chars", "a-zA-Z0-9_-"),
+                        getConfig().getInt("bot.max_id_length", 16), new long[0],
+                        // 官Q与传统机器人共用同一份状态卡片触发词。
+                        statusTriggerFor("official-bot"), getConfig().getInt("bot.rate_limit_max", 3),
+                        getConfig().getInt("bot.rate_limit_window", 60), getConfig().getInt("bot.reply_delay_min_ms", 1000),
+                        getConfig().getInt("bot.reply_delay_max_ms", 2000));
+                handler.setDebugLog(getConfig().getBoolean("official_qq.debug_log", false));
+                handler.setMailService(smtp);
+                officialQQBot = new OfficialQQBot(getLogger(), getConfig().getString("official_qq.app_id", ""),
+                        getConfig().getString("official_qq.app_secret", ""), getConfig().getString("official_qq.api_base", "https://api.bot.qq.com"),
+                        getConfig().getString("official_qq.token_base", "https://api.bot.qq.com"),
+                        getConfig().getString("official_qq.gateway", ""), whitelistRepository, smtp,
+                        getConfig().getInt("official_qq.code_digits", 6), getConfig().getInt("official_qq.code_expire_minutes", 10),
+                        // 官Q不限制群聊：groups 留空即允许所有群，避免平台OpenID变动导致失效。
+                        java.util.Set.of(), handler::handle);
+                new Thread(officialQQBot::start, "LuoOS-Official-QQ").start();
+            } catch (Exception e) { getLogger().severe("Failed to start official QQ bot: " + e.getMessage()); }
         }
 
         // Auto-detect and PERMANENTLY disable AuthMe to prevent authentication conflicts.
@@ -213,6 +367,7 @@ public final class HeosFoliaPlugin extends JavaPlugin {
         if (recipeSyncService != null) recipeSyncService.close();
         if (bypassService != null) bypassService.close();
         if (botServer != null) botServer.stopServer();
+        if (officialQQBot != null) officialQQBot.stop();
         if (resourceWorldManager != null) resourceWorldManager.close();
         getLogger().info("Heos Folia disabled.");
     }

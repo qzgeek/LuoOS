@@ -1,9 +1,9 @@
 name: luoos
-version: 0.06
+version: 0.10
 main: heos.folia.HeosFoliaPlugin
 api-version: '1.21'
 folia-supported: true
-author: chara201x, qzgeek
+author: chara201x, qzgeek, CatXiaolan
 website: https://github.com/chara2015/heos
 description: LuoOS - Minecraft server utility mod
 commands:

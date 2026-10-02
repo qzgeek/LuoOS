@@ -61,6 +61,7 @@ subprojects {
         "implementation"("org.xerial:sqlite-jdbc:3.49.1.0")
         "implementation"("at.favre.lib:bcrypt:0.10.2")
         "implementation"("org.java-websocket:Java-WebSocket:1.5.7")
+        "implementation"("com.sun.mail:jakarta.mail:2.0.1")
         "compileOnly"("me.clip:placeholderapi:2.11.6")
     }
 

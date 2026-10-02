@@ -6,6 +6,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 import java.util.logging.Logger;
+import java.util.Optional;
 
 /**
  * Single data-access boundary for the QQ whitelist and QQ blacklist tables.
@@ -19,11 +20,13 @@ public final class FoliaWhitelistRepository {
 
     private final FoliaStorage storage;
     private final Logger logger;
+    private final OfficialBindingRepository officialBindings;
 
     public FoliaWhitelistRepository(FoliaStorage storage, Logger logger) {
         this.storage = storage;
         this.logger = logger;
         storage.initialize();
+        officialBindings = new OfficialBindingRepository(storage, storage::getConnection, storage.isMySQL(), logger);
     }
 
     public List<String> getWhitelist(long qq) {
@@ -233,8 +236,8 @@ public final class FoliaWhitelistRepository {
         }, false);
     }
 
-    public void blacklist(long qq, Long durationSeconds, String reason) {
-        update("blacklist", () -> {
+    public boolean blacklist(long qq, Long durationSeconds, String reason) {
+        return update("blacklist", () -> {
             Long expiry = durationSeconds == null ? null : System.currentTimeMillis() + durationSeconds * 1000L;
             String sql = storage.isMySQL()
                     ? "INSERT INTO qq_blacklist (qq, reason, banned_at, expiry) VALUES (?, ?, ?, ?) ON DUPLICATE KEY UPDATE reason=VALUES(reason), banned_at=VALUES(banned_at), expiry=VALUES(expiry)"
@@ -250,14 +253,35 @@ public final class FoliaWhitelistRepository {
         });
     }
 
-    public void unblacklist(long qq) {
-        update("unblacklist", () -> {
+    public boolean unblacklist(long qq) {
+        return update("unblacklist", () -> {
             try (PreparedStatement ps = connection().prepareStatement("DELETE FROM qq_blacklist WHERE qq = ?")) {
                 ps.setLong(1, qq);
                 ps.executeUpdate();
                 return true;
             }
         });
+    }
+
+    public void createOfficialBindingTable() {
+        officialBindings.initialize();
+    }
+
+    public Optional<Long> officialQq(String openid) {
+        return officialBindings.officialQq(openid);
+    }
+
+    public boolean officialBindingExistsForQq(long qq) {
+        return officialBindings.bindingExistsForQq(qq);
+    }
+
+    public boolean requestOfficialCode(String openid, long qq, String codeHash, long expiresAt,
+                                       OfficialBindingRepository.MailDelivery delivery) {
+        return officialBindings.requestCode(openid, qq, codeHash, expiresAt, System.currentTimeMillis(), delivery);
+    }
+
+    public boolean confirmOfficialCode(String openid, String codeHash, long now) {
+        return officialBindings.confirmCode(openid, codeHash, now);
     }
 
     public String blacklistReasonForPlayer(String playerName) {

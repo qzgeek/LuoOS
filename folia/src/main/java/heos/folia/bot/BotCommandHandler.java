@@ -32,6 +32,7 @@ public class BotCommandHandler {
     private final FoliaStorage storage;
     private final FoliaWhitelistRepository whitelistRepository;
     private final BotStatusService statusService;
+    private SmtpCodeService mail;
     private final int maxPerQq;
     private final Pattern idPattern;
     private final long[] allowedGroups;
@@ -44,10 +45,12 @@ public class BotCommandHandler {
     // Reply delay range (ms)
     private final int delayMinMs;
     private final int delayMaxMs;
-    private final java.util.Random random = new java.util.Random();
+    private final java.util.Random random = new java.security.SecureRandom();
 
     boolean debugLog = false;
     public void setDebugLog(boolean d) { this.debugLog = d; }
+    /** 邮件通道，用于把重置后的密码发送到用户QQ邮箱；未配置时拒绝改密。 */
+    public void setMailService(SmtpCodeService service) { this.mail = service; }
 
     // --- Patterns ---
     private static final Pattern APPLY = Pattern.compile("^(申请白名单|白名单|添加白名单)\\s*(\\S+)$");
@@ -108,11 +111,22 @@ public class BotCommandHandler {
             throw new IllegalArgumentException("Invalid allowed_id_chars: '" + allowedIdChars + "'", e);
         }
         this.allowedGroups = allowedGroups;
-        this.statusTrigger = statusTrigger;
+        // 支持 '|' 分隔的多个状态卡片触发词。
+        this.statusTrigger = statusTrigger == null ? "" : statusTrigger;
         this.rateMax = rateMax;
         this.rateWindowMs = rateWindowSec * 1000L;
         this.delayMinMs = delayMinMs;
         this.delayMaxMs = delayMaxMs;
+    }
+
+    /** 状态卡片触发词匹配（支持 card-cmd 列表拼成的多选）。 */
+    private boolean isStatusTrigger(String text) {
+        if (text == null || statusTrigger.isEmpty()) return false;
+        for (String trigger : statusTrigger.split("\\|")) {
+            String value = trigger.trim();
+            if (!value.isEmpty() && value.equalsIgnoreCase(text.trim())) return true;
+        }
+        return false;
     }
 
     private void delayReply() {
@@ -143,11 +157,12 @@ public class BotCommandHandler {
 
         // Global rate limit (admins bypass, silent ignore)
         if (!isAdmin && !checkRate(groupId)) {
+            if (event.isOfficial()) event.reply("操作过于频繁，请稍后再试。");
             return;
         }
 
         // Apply reply delay for recognized commands
-        boolean isCommand = STATUS.matcher(text).matches() || HELP.matcher(text).matches()
+        boolean isCommand = (STATUS.matcher(text).matches() || isStatusTrigger(text)) || HELP.matcher(text).matches()
                 || BOT_LIST.matcher(text).matches()
                 || APPLY.matcher(text).matches() || DELETE.matcher(text).matches()
                 || RESET_PASSWORD.matcher(text).matches()
@@ -157,7 +172,7 @@ public class BotCommandHandler {
         }
 
         // --- Status (rate-limited for non-admin) ---
-        if (STATUS.matcher(text).matches()) {
+        if (STATUS.matcher(text).matches() || isStatusTrigger(text)) {
             handleStatus(event);
             return;
         }
@@ -168,6 +183,12 @@ public class BotCommandHandler {
         // --- Bot list ---
         if (BOT_LIST.matcher(text).matches()) { handleBots(event); return; }
 
+        // 公开状态/菜单/人机列表不需要QQ身份；账号与管理命令必须验证。
+        if (event.isOfficial() && (!event.officialIdentityVerified() || qq <= 0)) {
+            event.reply("尚未通过邮箱验证。请@机器人发送：绑定QQ <QQ号>，再发送：验证码 <邮箱验证码>。");
+            return;
+        }
+
         // --- Admin-only commands ---
         if (isAdmin) {
             // Ban list
@@ -176,9 +197,13 @@ public class BotCommandHandler {
             if (handleBan(qq, text, event)) return;
             // Unban
             if (handleUnban(qq, text, event)) return;
-            // Admin delete
+            // Admin delete（只发“删除”时给出用法，而不是当作未知命令）
             Matcher adm = ADMIN_DELETE.matcher(text);
             if (adm.matches()) { handleAdminDelete(qq, adm.group(1), event); return; }
+            if (event.isOfficial() && text.equals("删除")) {
+                event.missingTarget("删除 <QQ号> [游戏ID]，例如：删除 12345678 玩家名");
+                return;
+            }
         } else {
             // Non-admin tried admin command → deny silently
             if (BAN_CMD.matcher(text).matches() || UNBAN_CMD.matcher(text).matches()
@@ -216,6 +241,9 @@ public class BotCommandHandler {
                 || text.startsWith("查看") || text.startsWith("封禁") || text.startsWith("解封")
                 || text.startsWith("服务器") || text.startsWith("help") || text.startsWith("HELP"))) {
             logger.info("[BotHandler] Unknown command: " + text);
+        }
+        if (event.isOfficial()) {
+            event.reply("未知命令或参数不完整，请发送：帮助。");
         }
     }
 
@@ -332,7 +360,10 @@ public class BotCommandHandler {
             byte[] pngBytes = statusService.renderLocal();
             if (pngBytes != null && pngBytes.length > 0) {
                 String b64 = java.util.Base64.getEncoder().encodeToString(pngBytes);
-                event.replyImage("base64://" + b64);
+                Runtime rt = Runtime.getRuntime();
+                String fallback = "状态图片发送失败，以下为文字状态：\n" + statusService.formatStatusText(
+                        statusService.ping(), null, (rt.totalMemory() - rt.freeMemory()) * 100.0 / rt.maxMemory());
+                event.replyImageWithFallback("base64://" + b64, fallback);
             } else {
                 BotStatusService.ServerStatus info = statusService.ping();
                 Runtime rt = Runtime.getRuntime();
@@ -361,7 +392,13 @@ public class BotCommandHandler {
             + "解封/unban @QQ                   解禁用户\n"
             + "删除 @QQ <ID>                    删除指定用户的白名单\n"
             + "封禁列表/查看封禁列表/封神榜     查看封禁列表\n\n"
-            + "Write by 黔中极客 / LuoOS Bot v0.09";
+            + "Write by 黔中极客 / LuoOS Bot v0.10";
+        txt += "\n看看人机/在线人机/人机列表       查看在线人机";
+        if (event.isOfficial()) txt = "【官方QQ】群内每条命令都需要@机器人。\n"
+                + "帮助、状态、人机列表无需绑定；其他操作先验证邮箱。\n"
+                + "绑定QQ <QQ号> → 验证码 <邮箱验证码>\n"
+                + "管理员可直接使用QQ号；@目标需要目标已验证。\n"
+                + "重置密码前先与机器人单聊，再于4分钟内回群操作。\n\n" + txt;
         event.reply(txt);
         event.react(true);
     }
@@ -435,7 +472,9 @@ public class BotCommandHandler {
 
     private void handleSelfDelete(long qq, String playerId, OneBotEvent event) {
         if (!botDb.hasWhitelist(qq, playerId)) { event.react(false); return; }
-        botDb.removeWhitelist(qq, playerId);
+        if (!botDb.removeWhitelist(qq, playerId)) {
+            event.reply("删除失败：记录不存在或数据库异常。"); return;
+        }
         try {
             org.bukkit.Bukkit.getGlobalRegionScheduler().run(
                     org.bukkit.Bukkit.getPluginManager().getPlugin("luoos"),
@@ -453,10 +492,10 @@ public class BotCommandHandler {
 
     /**
      * 重置密码 <账号名> — the QQ must own the account (qq_whitelist binding).
-     * Generates a random password, updates the stored hash, and sends the new
-     * password to the player via QQ private message. If the private message
-     * cannot be delivered, the change is rolled back so the player is never
-     * locked out with a password they didn't receive.
+     * Generates a random password, updates the stored hash, and mails the new
+     * password to <QQ号>@qq.com. If the mail cannot be delivered, the change is
+     * rolled back so the player is never locked out with an undelivered password.
+     * 密码不会出现在群消息或日志中。
      */
     private void handleResetPassword(long qq, String accountName, OneBotEvent event) {
         if (botDb.isBlacklisted(qq)) { event.reactDeny(); return; }
@@ -484,34 +523,39 @@ public class BotCommandHandler {
             event.react(false);
             return;
         }
+        if (mail == null) {
+            logger.warning("[BotHandler] reset-password: SMTP not configured, refusing to reset");
+            event.reply("重置失败：邮件服务未配置，密码未修改。请联系管理员。");
+            event.react(false);
+            return;
+        }
 
         lastResetPassword.put(qq, now);
 
         String oldHash = data.passwordHash;
-        // 6-char password: letters + digits only
-        String newPassword = generatePassword(6);
+        String newPassword = generatePassword(12);
         data.passwordHash = heos.folia.utils.FoliaPasswordHasher.hashPassword(newPassword);
         storage.save(data);
 
-        String msg = "你的 LuoOS 账号 [" + data.effectiveDisplayName() + "] 密码已重置。\n"
-                + "新密码: " + newPassword + "\n"
-                + "登录: 游戏内输入 /login " + newPassword + "\n"
-                + "改密: 登录后请尽快用 /changepassword <旧密码> <新密码> 修改密码";
         final FoliaPlayerData savedData = data;
-        event.sendPrivateThen(qq, msg, sent -> {
-            if (sent) {
-                logger.info("[BotHandler] QQ" + qq + " reset password for '" + ownedName + "' (sent via private msg)");
-                event.replyAt("账号 [" + savedData.effectiveDisplayName() + "] 密码已重置，新密码已通过私聊发送，请查收。");
-                event.react(true);
-            } else {
-                // Roll back — never leave the player locked out with an undelivered password
-                savedData.passwordHash = oldHash;
-                storage.save(savedData);
-                logger.warning("[BotHandler] reset-password: private msg to QQ" + qq + " FAILED — rolled back");
-                event.replyAt("重置失败：无法向你的QQ发送私聊消息，请检查是否开启了「允许陌生人私聊」。");
-                event.react(false);
-            }
-        });
+        final String displayName = data.effectiveDisplayName();
+        if (mail == null) { // 二次防护：不得在无邮件通道时改密。
+            savedData.passwordHash = oldHash; storage.save(savedData);
+            event.reply("重置失败：邮件服务未配置，密码已回滚。"); event.react(false); return;
+        }
+        try {
+            mail.sendPasswordReset(qq + "@qq.com", displayName, newPassword);
+            logger.info("[BotHandler] QQ" + qq + " reset password for '" + ownedName + "' (sent via email)");
+            event.replyAt("账号 [" + displayName + "] 密码已重置，新密码已发送到 " + qq + "@qq.com，请查收。");
+            event.react(true);
+        } catch (Exception e) {
+            // Roll back — never leave the player locked out with an undelivered password
+            savedData.passwordHash = oldHash;
+            storage.save(savedData);
+            logger.warning("[BotHandler] reset-password: email to QQ" + qq + " FAILED — rolled back");
+            event.replyAt("重置失败：无法发送邮件到 " + qq + "@qq.com，密码未修改，请稍后重试。");
+            event.react(false);
+        }
     }
 
     /** Case-insensitive lookup of the exact stored account name owned by this QQ. */
@@ -601,10 +645,9 @@ public class BotCommandHandler {
         Matcher m = BAN_CMD.matcher(text);
         if (!m.matches()) return false;
         long targetQq = extractTargetQq(text, event);
-        if (targetQq == 0) { event.react(false); return true; }
+        if (targetQq == 0) { event.missingTarget("封禁 <QQ号> [时长]，例如：封禁 12345678 1h"); return true; }
         String dur = parseDuration(text);
-        botDb.blacklist(targetQq, dur.equals("permanent") ? null : parseDurationSeconds(dur), "QQ ban");
-        event.react(true);
+        event.react(botDb.blacklist(targetQq, dur.equals("permanent") ? null : parseDurationSeconds(dur), "QQ ban"));
         return true;
     }
 
@@ -614,9 +657,8 @@ public class BotCommandHandler {
         Matcher m = UNBAN_CMD.matcher(text);
         if (!m.matches()) return false;
         long targetQq = extractTargetQq(text, event);
-        if (targetQq == 0) { event.react(false); return true; }
-        botDb.unblacklist(targetQq);
-        event.react(true);
+        if (targetQq == 0) { event.missingTarget("解封 <QQ号>，例如：解封 12345678"); return true; }
+        event.react(botDb.unblacklist(targetQq));
         return true;
     }
 
@@ -624,17 +666,22 @@ public class BotCommandHandler {
 
     private void handleAdminDelete(long adminQq, String args, OneBotEvent event) {
         long targetQq = extractTargetQq(args, event);
-        if (targetQq == 0) { event.react(false); return; }
+        if (targetQq == 0) { event.missingTarget("删除 <QQ号> [游戏ID]，例如：删除 12345678 玩家名"); return; }
         // Extract player ID from args (after @mention or QQ number)
-        String playerId = extractPlayer(args);
-        if (playerId != null && !playerId.isEmpty()) {
-            botDb.removeWhitelist(targetQq, playerId);
+        String playerId = args.replaceAll("\\[CQ:at,[^]]+\\]", "").replaceAll("@\\S+", "").trim();
+        playerId = playerId.replaceFirst("^" + targetQq + "(?:\\s+|$)", "").trim();
+        if (!playerId.isEmpty()) {
+            if (!idPattern.matcher(playerId).matches()) { event.reply("游戏ID格式错误，未删除任何记录。"); return; }
+            event.react(botDb.removeWhitelist(targetQq, playerId));
         } else {
-            // Delete all
             var all = botDb.getWhitelist(targetQq);
-            for (String p : all) botDb.removeWhitelist(targetQq, p);
+            if (all.isEmpty()) { event.reply("该QQ没有可删除的白名单。"); return; }
+            int deleted = 0;
+            for (String name : all) if (botDb.removeWhitelist(targetQq, name)) deleted++;
+            event.reply("已删除 " + deleted + "/" + all.size() + " 条白名单。"
+                    + (deleted == all.size() ? "" : "部分删除失败，请检查数据库后重试。"));
+            event.react(deleted == all.size());
         }
-        event.react(true);
     }
 
     // ======================== Admin: ban list ========================
@@ -678,7 +725,9 @@ public class BotCommandHandler {
             }
         }
         Matcher m = Pattern.compile("\\b(\\d{5,})\\b").matcher(text);
-        if (m.find()) return Long.parseLong(m.group(1));
+        if (m.find()) {
+            try { return Long.parseLong(m.group(1)); } catch (NumberFormatException ignored) { return 0; }
+        }
         return 0;
     }
 

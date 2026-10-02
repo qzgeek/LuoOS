@@ -1,23 +1,25 @@
-# LuoOS v0.09 使用文档
+# LuoOS v0.10 使用文档
 
-LuoOS 是一款面向 Folia 服务器的综合管理插件，提供登录认证、账号绑定、QQ机器人、玩家统计排行榜、资源世界自动刷新等功能。
+LuoOS 是一款面向 Folia 服务器的综合管理插件，提供登录认证、账号绑定、QQ机器人、玩家统计排行榜、资源世界自动刷新等功能。项目作者：chara201x、qzgeek、CatXiaolan。
+
+LuoOS 面向 Folia 服务器，提供认证、账号绑定、数据库白名单、QQ 机器人、玩家统计、资源世界和维护模式等功能。本文档按“安装 → 升级 → 配置 → 使用”组织，首次部署可直接从下方快速开始。
 
 ## 支持的 Minecraft 版本
 
 | 版本范围 | Jar 文件 |
 |---------|---------|
-| 1.20 - 1.20.1 | `luoos-folia-mc1.20-1.20.1-0.09.jar` |
-| 1.20.2 - 1.20.3 | `luoos-folia-mc1.20.2-1.20.3-0.09.jar` |
-| 1.20.4 | `luoos-folia-mc1.20.4-0.09.jar` |
-| 1.20.5 - 1.20.6 | `luoos-folia-mc1.20.5-1.20.6-0.09.jar` |
-| 1.21 - 1.21.4 | `luoos-folia-mc1.21-1.21.4-0.09.jar` |
-| 1.21.5 | `luoos-folia-mc1.21.5-0.09.jar` |
-| 1.21.6 - 1.21.7 | `luoos-folia-mc1.21.6-1.21.7-0.09.jar` |
-| 1.21.8 - 1.21.10 | `luoos-folia-mc1.21.8-1.21.10-0.09.jar` |
-| 1.21.11 | `luoos-folia-mc1.21.11-0.09.jar` |
-| 26.1 | `luoos-folia-mc26.1-0.09.jar` |
-| 26.1.1 | `luoos-folia-mc26.1.1-0.09.jar` |
-| 26.1.2 | `luoos-folia-mc26.1.2-0.09.jar` |
+| 1.20 - 1.20.1 | `luoos-folia-mc1.20-1.20.1-0.10.jar` |
+| 1.20.2 - 1.20.3 | `luoos-folia-mc1.20.2-1.20.3-0.10.jar` |
+| 1.20.4 | `luoos-folia-mc1.20.4-0.10.jar` |
+| 1.20.5 - 1.20.6 | `luoos-folia-mc1.20.5-1.20.6-0.10.jar` |
+| 1.21 - 1.21.4 | `luoos-folia-mc1.21-1.21.4-0.10.jar` |
+| 1.21.5 | `luoos-folia-mc1.21.5-0.10.jar` |
+| 1.21.6 - 1.21.7 | `luoos-folia-mc1.21.6-1.21.7-0.10.jar` |
+| 1.21.8 - 1.21.10 | `luoos-folia-mc1.21.8-1.21.10-0.10.jar` |
+| 1.21.11 | `luoos-folia-mc1.21.11-0.10.jar` |
+| 26.1 | `luoos-folia-mc26.1-0.10.jar` |
+| 26.1.1 | `luoos-folia-mc26.1.1-0.10.jar` |
+| 26.1.2 | `luoos-folia-mc26.1.2-0.10.jar` |
 
 推荐启动命令（Folia 26.1+）：
 ```bash
@@ -36,7 +38,7 @@ java --add-modules=jdk.incubator.vector -jar lophine-server.jar --nogui
 
 ### 从旧版本升级
 
-v0.08 内置自动升级系统：
+v0.10 保留并扩展了旧版本自动升级系统：
 - 首次启动时自动检测旧版数据库（HEOS/LuoOS v0.07），自动迁移数据
 - 自动为旧 `player_stats` 表添加新字段（entities_killed）
 - 自动创建 `player_stats_daily` 日统计表
@@ -44,7 +46,75 @@ v0.08 内置自动升级系统：
 
 无需手动操作，安装新版 jar 后直接重启即可。
 
-**v0.09 资源世界兼容升级**：旧版本的 `plugins/luoos/config.yml`、`player_data.db`、Worlds 世界目录均可直接保留。升级启动时会优先识别 `world/dimensions/luoos_resource/res_world` 等既有目录；如果旧版本未保存 `resourceWorld.currentSeed`，LuoOS 会从现有世界恢复种子，并将未导入的 Worlds 世界重新登记后加载。不会因为重启而删除或重新生成旧资源世界。
+### QQ 官方机器人接入
+
+两种 QQ 通道互相独立，可同时启用，共用同一套命令、白名单与数据库：
+
+- 私人机器人（OneBot）：`qq_bot.private-bot.enable`
+- 官方机器人（QQ 开放平台）：`qq_bot.official-bot.enable`
+
+两者都必须先打开总开关 `qq_bot.enable`。私聊机器人需要 QQ 框架用 WS 正向连接到本插件；官Q需要开放平台凭据与发件邮箱。
+
+```yaml
+qq_bot:
+  enable: true
+  private-bot:
+    enable: true
+    host: 0.0.0.0
+    port: 35013
+    access_token: "与框架一致"
+    qq_groups: []
+    card-cmd: ["服务器还活着吗", "状态", "服务器状态", "status", "state"]
+  official-bot:
+    enable: true
+    app_id: "你的AppID"
+    app_secret: "你的AppSecret"
+    # 官Q状态卡片命令独立配置，可与传统机器人不同
+    card-cmd: ["服务器还活着吗", "状态", "服务器状态", "status", "state"]
+    code_digits: 6
+    code_expire_minutes: 10
+    smtp:
+      host: "smtp.qq.com"
+      port: 465
+      username: "发件邮箱"
+      password: "邮箱授权码"
+      from: "发件邮箱"
+      starttls: false
+```
+
+官Q不限制群聊：不再需要填写群 OpenID 列表。凭据只存服务器本地，切勿提交版本库。
+
+在 QQ 机器人开放平台开启群聊消息事件与对应 intents。群里 @ 机器人发送 `绑定QQ <QQ号>`，验证码会发到 `<QQ号>@qq.com`；再 @ 机器人发送 `验证码 <验证码>` 完成绑定。只有验证成功后，OpenID 才会映射为命令处理器使用的 QQ 号。
+
+验证码只保存 SHA-256 摘要，超时失效。SMTP 465 端口自动使用隐式 TLS，其他端口可按 `starttls` 强制 STARTTLS，均带网络超时。
+
+**身份安全规则：**
+- 邮件服务接受发信后，仅写 `qq_official_pending` 待验证记录；不会写正式绑定，也不会永久占用该 QQ。
+- 正确且未过期的验证码经过校验后，事务内写入 `qq_official_bindings` 并消费待验证记录。验证码不可重复使用。
+- 错码、过期、邮件失败、数据库失败均不授予身份；每次申请最多校验5次；同一 openid 或收件 QQ 发码冷却60秒。
+- 已确认的身份不允许直接覆盖。重启不会把待验证申请变成已确认绑定。
+- 旧版本错误写入正式表、且 `code_hash` 非空的未验证记录，会在事务内原样归档至 `qq_official_binding_archive` 并移出正式表，需重新申请；原已确认记录保留。迁移失败时不启用官方身份查询，不影响原 OneBot 白名单表。
+
+**命令与回复对齐：**
+- `help / 帮助 / 菜单 / 命令`：完整帮助、邮箱验证流程、管理员命令。群内每条命令都需要 @机器人。
+- 状态卡片：各自读取所配置的 `card-cmd`，并支持 `服务器状态 / 服务器还活着吗`。复用传统状态卡（1500×700 PNG、服务器信息、在线玩家、自定义背景），通过官方分片上传接口发送图片，不需要图床；上传或发送失败时回复文字状态。图片分片序号兼容从 0 或 1 开始。
+- `看看人机 / 在线人机 / 人机列表`：复用在线人机列表。帮助、状态、人机列表无需绑定；账号查询、白名单和管理命令必须先验证邮箱，即使是群管理员也不能绕过。
+- 白名单申请、查询、删除、管理员封禁/解封/封禁列表：复用同一命令处理器与仓储。官方通道用中文文字代替 OneBot 的表情回应；数据库写失败不得回报成功。
+- 每个请求独立保留 `msg_id` 和递增 `msg_seq`，不再拿群里“最后一条消息”作为其他命令的回复目标；重复投递不重复执行，群标识不使用有碰撞风险的字符串哈希。
+- **官Q不支持 @目标**：官方群事件不提供被@成员的 QQ 号（无 mentions、content 中 @ 文本也被平台抹除），因此一律提示直接填写 QQ 号。管理命令缺目标时同样给出明确用法，不会只回“操作失败”。
+- `重置密码 <账号名>`：新密码通过邮件发送到 `<QQ号>@qq.com`，邮件中提示使用 `/changepassword <旧密码> <新密码>`。群内回复不含密码；邮件发送失败会回滚密码，不会出现“改了却收不到”。
+
+**配置结构说明：** `setting` / `account` / `account-binder` / `qq_bot` / `status-card` 为分组配置；旧的扁平键名（如 `bot.enabled`、`official_qq.enabled`）在内存中自动映射为对应分组键，两种写法都可用，升级不会导致功能静默失效。
+
+**当前能力边界：**已核实官方群事件提供 `member_role`，本实现读取它区分成员、管理员和群主。成员进退群自动冻结/恢复尚未适配官方事件，不能据此承诺与 OneBot 完全等价；长时间 token 刷新/自动重连仍需完善。图片与单聊受开放平台权限、审核和消息窗口限制；本地 HTTP 协议测试不等于腾讯真实群验收。不能将当前版本视为已完成全功能生产验收。
+
+官方机器人接入初版贡献者：CatXiaolan（猫小澜）。本轮对齐保留原贡献者署名，不改白名单/认证数据的所有权规则。
+
+验证码仓储的隔离回归测试见 `tests/README.md`。测试只使用临时 SQLite 库，不需要 QQ 或邮件密钥。
+
+官方接口文档：<https://bot.q.qq.com/wiki/develop/api-v2/>。当前 WebSocket 文档位于 `dev-prepare/event-emit/websocket.html`，其中 Identify 使用 `QQBot {AccessToken}` 和 `shard: [0, 1]`，不要混用旧版 Token 示例。
+
+**v0.10 资源世界兼容升级**：旧版本的 `plugins/luoos/config.yml`、`player_data.db`、Worlds 世界目录均可直接保留。升级启动时会优先识别 `world/dimensions/luoos_resource/res_world` 等既有目录；如果旧版本未保存 `resourceWorld.currentSeed`，LuoOS 会从现有世界恢复种子，并将未导入的 Worlds 世界重新登记后加载。不会因为重启而删除或重新生成旧资源世界。
 
 ---
 
@@ -242,7 +312,7 @@ resourceWorld:
   end: true                  # 创建资源终界
 ```
 
-**注意**：v0.09 使用固定日期刷新策略，不再使用旧版 `refreshIntervalMinutes`。默认每月25日 08:00 刷新；每次刷新后自动计算下一个月的刷新时间，服务器重启后倒计时不会重置。升级旧配置时无需手动删除旧键，新增的 `refreshDayOfMonth` 和 `refreshHour` 缺失时会使用默认值。
+**注意**：v0.10 使用固定日期刷新策略，不再使用旧版 `refreshIntervalMinutes`。默认每月25日 08:00 刷新；每次刷新后自动计算下一个月的刷新时间，服务器重启后倒计时不会重置。升级旧配置时无需手动删除旧键，新增的 `refreshDayOfMonth` 和 `refreshHour` 缺失时会使用默认值。
 
 ### 命令
 
@@ -353,6 +423,6 @@ usernameLoginFailureLockSeconds: 30   # 锁定时间(秒)
 
 ## 项目信息
 
-- 作者: chara201x, qzgeek (黔中极客)
+- 作者: chara201x, qzgeek (黔中极客), CatXiaolan
 - GitHub: https://github.com/qzgeek/heos-public
-- 分支: main | 标签: v0.09
+- 分支: main | 标签: v0.10

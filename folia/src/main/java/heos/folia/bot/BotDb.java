@@ -30,7 +30,7 @@ public final class BotDb {
         if (!added) logger.warning("[BotDb] whitelist entry was not added: " + playerName);
         return added;
     }
-    public void removeWhitelist(long qq, String playerName) { repository.removeWhitelist(qq, playerName); }
+    public boolean removeWhitelist(long qq, String playerName) { return repository.removeWhitelist(qq, playerName); }
 
     public static final class WhitelistEntry {
         public final String playerName;
@@ -56,10 +56,10 @@ public final class BotDb {
     public int unfreezeWhitelist(long qq) { return repository.unfreezeWhitelist(qq); }
 
     public boolean isBlacklisted(long qq) { return repository.isBlacklisted(qq); }
-    public void blacklist(long qq, Long durationSeconds, String reason) {
-        repository.blacklist(qq, durationSeconds, reason);
+    public boolean blacklist(long qq, Long durationSeconds, String reason) {
+        return repository.blacklist(qq, durationSeconds, reason);
     }
-    public void unblacklist(long qq) { repository.unblacklist(qq); }
+    public boolean unblacklist(long qq) { return repository.unblacklist(qq); }
 
     public List<FoliaWhitelistRepository.BlacklistEntry> getBlacklistEntries(int limit) {
         return repository.getBlacklistEntries(limit);
