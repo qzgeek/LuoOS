@@ -92,8 +92,9 @@ public class CommandParityRegression {
             storage.save(account);
             for (int i = 0; i < 100 && storage.load("KeepUser") == null; i++) Thread.sleep(50);
             check(storage.load("KeepUser") != null && storage.load("KeepUser").isRegistered(), "account registered fixture");
-            check(run(handler, "重置密码 KeepUser", true, "member", 22222).contains("邮件服务未配置"), "no mail guard");
-            pass("未配置邮件通道时拒绝改密且不报成功");
+            // 官Q必须邮件送达；未配置邮件时拒绝改密，传统通道不受影响
+            check(run(handler, "重置密码 KeepUser", true, "member", 22222).contains("邮件服务未配置"), "official needs SMTP");
+            pass("官Q未配置邮件时拒绝改密且不报成功");
             String missing = run(handler, "封禁", true, "admin");
             check(missing.contains("缺少目标QQ号") && missing.contains("用法"), "missing target guidance");
             check(run(handler, "解封", true, "admin").contains("缺少目标QQ号"), "unban guidance");
@@ -114,9 +115,39 @@ public class CommandParityRegression {
                 }
             });
             String reply = run(handler, "重置密码 KeepUser", true, "member", 22222);
-            check(sent.get() == 1, "password emailed once");
+            check(sent.get() == 1, "password emailed once (official)");
             check(reply.contains("22222@qq.com") && !reply.matches(".*[A-Za-z0-9]{12}.*"), "group reply hides password");
-            pass("重置密码改为发往QQ邮箱，群回复不含密码");
+            pass("官Q重置密码发往QQ邮箱，群回复不含密码");
+
+            // 传统通道：应走私聊，且完全不使用邮件
+            int mailsBefore = sent.get();
+            // 避开 60 秒冷却：使用另一个已被传统通道占用、但不是 22222 的 QQ
+            check(repo.addWhitelist(33333, "LegacyUser", null), "legacy fixture");
+            var legacyAccount = new FoliaPlayerData("LegacyUser", java.util.UUID.randomUUID(), false);
+            legacyAccount.passwordHash = heos.folia.utils.FoliaPasswordHasher.hashPassword("oldPassword1");
+            storage.save(legacyAccount);
+            for (int i = 0; i < 100 && storage.load("LegacyUser") == null; i++) Thread.sleep(50);
+            output.clear();
+            JsonObject legacyData = new JsonObject(), legacySender = new JsonObject();
+            legacyData.addProperty("post_type", "message");
+            legacyData.addProperty("message_type", "group");
+            legacyData.addProperty("group_id", 100);
+            legacyData.addProperty("user_id", 33333);
+            legacyData.addProperty("raw_message", "重置密码 LegacyUser");
+            legacySender.addProperty("role", "member");
+            legacyData.add("sender", legacySender);
+            handler.handle(new OneBotEvent(legacyData, "onebot:test", (action, params) -> {
+                JsonObject response = JsonParser.parseString(params).getAsJsonObject();
+                response.addProperty("action", action);
+                output.add(response);
+                return CompletableFuture.completedFuture(ok());
+            }));
+            String legacyOut = output.toString();
+            check(sent.get() == mailsBefore, "legacy must NOT send email");
+            check(legacyOut.contains("send_private_msg"), "legacy uses private message");
+            check(!legacyOut.contains("已发送到") || !legacyOut.contains("@qq.com")
+                    || !legacyOut.contains("新密码已发送到"), "legacy reply must not claim email delivery");
+            pass("传统通道重置密码走私聊且不使用邮件");
             AtomicInteger callbacks = new AtomicInteger();
             OneBotEvent failing = new OneBotEvent(command("",true,"member",true).raw, "official:test", (a,p) -> CompletableFuture.failedFuture(new Exception("fixture")));
             failing.sendPrivateThen(10001,"test", result -> { check(!result,"failed future false"); callbacks.incrementAndGet(); });

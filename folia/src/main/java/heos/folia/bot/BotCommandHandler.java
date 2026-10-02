@@ -385,26 +385,65 @@ public class BotCommandHandler {
     // ======================== Help ========================
 
     private void handleHelp(OneBotEvent event) {
-        String txt = "LuoOS Bot 命令帮助\n\n"
-            + "申请白名单/白名单/添加白名单 <ID>  申请白名单\n"
-            + "删除白名单/移除白名单 <ID>        删除自己的白名单\n"
-            + "查询白名单/查询/查看 [name/QQ]    查看白名单\n"
-            + "重置密码 <账号名>                 重置名下账号密码(新密码私聊发送)\n"
-            + "服务器还活着吗/服务器状态         查看服务器状态\n"
-            + "help/帮助/菜单                    显示此帮助\n\n"
-            + "——管理员——\n"
-            + "封禁/ban @QQ [时长]              封禁用户\n"
-            + "解封/unban @QQ                   解禁用户\n"
-            + "删除 @QQ <ID>                    删除指定用户的白名单\n"
-            + "封禁列表/查看封禁列表/封神榜     查看封禁列表\n\n"
-            + "Write by 黔中极客 / LuoOS Bot v0.10";
-        txt += "\n看看人机/在线人机/人机列表       查看在线人机";
-        if (event.isOfficial()) txt = "【官方QQ】群内每条命令都需要@机器人。\n"
-                + "帮助、状态、人机列表无需绑定；其他操作先验证邮箱。\n"
-                + "绑定QQ <QQ号> → 验证码 <邮箱验证码>\n"
-                + "管理员可直接使用QQ号；@目标需要目标已验证。\n"
-                + "重置密码前先与机器人单聊，再于4分钟内回群操作。\n\n" + txt;
-        event.reply(txt);
+        boolean official = event.isOfficial();
+        StringBuilder sb = new StringBuilder();
+
+        if (official) {
+            sb.append("LuoOS Bot 命令帮助（官方QQ通道）\n")
+              .append("────────────────────────────\n")
+              .append("群内每条命令都需要 @机器人。\n")
+              .append("帮助、状态、人机列表无需绑定；\n")
+              .append("其余操作需先完成邮箱验证：\n")
+              .append("  1. 发送「绑定QQ <QQ号>」\n")
+              .append("  2. 收取 <QQ号>@qq.com 的邮件\n")
+              .append("  3. 发送「验证码 <验证码>」\n")
+              .append("────────────────────────────\n")
+              .append("【玩家命令】\n")
+              .append("   申请白名单 <游戏ID>   申请白名单\n")
+              .append("   删除白名单 <游戏ID>   删除自己的白名单\n")
+              .append("   查询白名单            查看自己的白名单\n")
+              .append("   查询白名单 <QQ号>     查看指定QQ的白名单\n")
+              .append("   重置密码 <账号名>     重置密码（发到QQ邮箱）\n")
+              .append("   服务器状态            查看服务器状态卡片\n")
+              .append("   看看人机              查看在线人机列表\n")
+              .append("   帮助                  显示本帮助\n")
+              .append("────────────────────────────\n")
+              .append("【管理员命令】\n")
+              .append("   封禁 <QQ号> [时长]    封禁用户（如 1h、3天）\n")
+              .append("   解封 <QQ号>           解禁用户\n")
+              .append("   删除 <QQ号> [游戏ID]  删除该QQ的白名单\n")
+              .append("   封禁列表              查看封禁列表\n")
+              .append("────────────────────────────\n")
+              .append("注意：官方接口不提供被@成员的QQ号，\n")
+              .append("      请直接填写QQ号，不要用@。\n")
+              .append("────────────────────────────\n")
+              .append("Write by 黔中极客 / LuoOS Bot v0.10");
+            event.reply(sb.toString());
+            event.react(true);
+            return;
+        }
+
+        // 传统 OneBot 通道
+        sb.append("LuoOS Bot 命令帮助\n")
+          .append("────────────────────────────\n")
+          .append("【玩家命令】\n")
+          .append("   申请白名单 <游戏ID>       申请白名单\n")
+          .append("   删除白名单 <游戏ID>       删除自己的白名单\n")
+          .append("   查询白名单                查看自己的白名单\n")
+          .append("   查询白名单 <QQ号/ID>      查看指定对象的白名单\n")
+          .append("   重置密码 <账号名>         重置密码（私聊发送新密码）\n")
+          .append("   服务器状态                查看服务器状态卡片\n")
+          .append("   看看人机                  查看在线人机列表\n")
+          .append("   帮助                      显示本帮助\n")
+          .append("────────────────────────────\n")
+          .append("【管理员命令】\n")
+          .append("   封禁 <@某人|QQ号> [时长]  封禁用户（如 1h、3天）\n")
+          .append("   解封 <@某人|QQ号>         解禁用户\n")
+          .append("   删除 <@某人|QQ号> [ID]    删除该用户的白名单\n")
+          .append("   封禁列表                  查看封禁列表\n")
+          .append("────────────────────────────\n")
+          .append("Write by 黔中极客 / LuoOS Bot v0.10");
+        event.reply(sb.toString());
         event.react(true);
     }
 
@@ -497,9 +536,14 @@ public class BotCommandHandler {
 
     /**
      * 重置密码 <账号名> — the QQ must own the account (qq_whitelist binding).
-     * Generates a random password, updates the stored hash, and mails the new
-     * password to <QQ号>@qq.com. If the mail cannot be delivered, the change is
-     * rolled back so the player is never locked out with an undelivered password.
+     *
+     * 两个通道的送达方式不同：
+     *   官方QQ：官方接口不支持可靠的私聊投递（且群/单聊 OpenID 不通用），
+     *           因此把新密码发送到 <QQ号>@qq.com 邮箱。
+     *   传统QQ：沿用私聊发送（OneBot 的临时会话可直接送达）。
+     *
+     * 两种方式都必须确认送达成功后才算完成；投递失败一律回滚密码，
+     * 避免玩家出现「密码已改但收不到新密码」而被锁死。
      * 密码不会出现在群消息或日志中。
      */
     private void handleResetPassword(long qq, String accountName, OneBotEvent event) {
@@ -528,7 +572,10 @@ public class BotCommandHandler {
             event.react(false);
             return;
         }
-        if (mail == null) {
+
+        boolean official = event.isOfficial();
+        // 各自检查所需通道是否可用，避免改完密码才发现送不出去
+        if (official && mail == null) {
             logger.warning("[BotHandler] reset-password: SMTP not configured, refusing to reset");
             event.reply("重置失败：邮件服务未配置，密码未修改。请联系管理员。");
             event.react(false);
@@ -544,23 +591,44 @@ public class BotCommandHandler {
 
         final FoliaPlayerData savedData = data;
         final String displayName = data.effectiveDisplayName();
-        if (mail == null) { // 二次防护：不得在无邮件通道时改密。
-            savedData.passwordHash = oldHash; storage.save(savedData);
-            event.reply("重置失败：邮件服务未配置，密码已回滚。"); event.react(false); return;
+        final String oldHashFinal = oldHash;
+
+        if (official) {
+            // 官方QQ：邮件送达
+            try {
+                mail.sendPasswordReset(qq + "@qq.com", displayName, newPassword);
+                logger.info("[BotHandler] QQ" + qq + " reset password for '" + ownedName + "' (sent via email)");
+                event.replyAt("账号 [" + displayName + "] 密码已重置，新密码已发送到 " + qq + "@qq.com，请查收。");
+                event.react(true);
+            } catch (Exception e) {
+                savedData.passwordHash = oldHashFinal;
+                storage.save(savedData);
+                logger.warning("[BotHandler] reset-password: email to QQ" + qq + " FAILED — rolled back");
+                event.replyAt("重置失败：无法发送邮件到 " + qq + "@qq.com，密码未修改，请稍后重试。");
+                event.react(false);
+            }
+            return;
         }
-        try {
-            mail.sendPasswordReset(qq + "@qq.com", displayName, newPassword);
-            logger.info("[BotHandler] QQ" + qq + " reset password for '" + ownedName + "' (sent via email)");
-            event.replyAt("账号 [" + displayName + "] 密码已重置，新密码已发送到 " + qq + "@qq.com，请查收。");
-            event.react(true);
-        } catch (Exception e) {
-            // Roll back — never leave the player locked out with an undelivered password
-            savedData.passwordHash = oldHash;
-            storage.save(savedData);
-            logger.warning("[BotHandler] reset-password: email to QQ" + qq + " FAILED — rolled back");
-            event.replyAt("重置失败：无法发送邮件到 " + qq + "@qq.com，密码未修改，请稍后重试。");
-            event.react(false);
-        }
+
+        // 传统QQ：私聊送达
+        event.sendPrivateThen(qq,
+                "你的 LuoOS 账号 [" + displayName + "] 密码已重置。\n"
+                        + "新密码: " + newPassword + "\n"
+                        + "登录: 游戏内输入 /login " + newPassword + "\n"
+                        + "改密: 登录后请尽快用 /changepassword <旧密码> <新密码> 修改",
+                sent -> {
+                    if (sent) {
+                        logger.info("[BotHandler] QQ" + qq + " reset password for '" + ownedName + "' (sent via private msg)");
+                        event.replyAt("账号 [" + displayName + "] 密码已重置，新密码已通过私聊发送，请查收。");
+                        event.react(true);
+                    } else {
+                        savedData.passwordHash = oldHashFinal;
+                        storage.save(savedData);
+                        logger.warning("[BotHandler] reset-password: private msg to QQ" + qq + " FAILED — rolled back");
+                        event.replyAt("重置失败：无法向你的QQ发送私聊消息，请检查是否开启了「允许陌生人私聊」。");
+                        event.react(false);
+                    }
+                });
     }
 
     /** Case-insensitive lookup of the exact stored account name owned by this QQ. */

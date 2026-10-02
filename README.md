@@ -1,8 +1,15 @@
 # LuoOS v0.10 使用文档
 
-LuoOS 是一款面向 Folia 服务器的综合管理插件，提供登录认证、账号绑定、QQ机器人、玩家统计排行榜、资源世界自动刷新等功能。项目作者：chara201x、qzgeek、CatXiaolan。
+LuoOS 是一款面向 Folia 服务器的综合管理插件，提供登录认证、账号绑定、QQ 机器人、玩家统计排行榜、资源世界自动刷新等功能。
 
-LuoOS 面向 Folia 服务器，提供认证、账号绑定、数据库白名单、QQ 机器人、玩家统计、资源世界和维护模式等功能。本文档按“安装 → 升级 → 配置 → 使用”组织，首次部署可直接从下方快速开始。
+**v0.10 主要变化**
+
+- 新增**官方 QQ 机器人**通道（QQ 开放平台），与原有 OneBot 机器人可同时运行
+- 配置结构改为分组式（`setting` / `account` / `qq_bot` / `status-card`），并向下兼容旧键名
+- 统一配置读取入口，新增配置自检，避免配置项静默失效
+- 配置文件内置逐条中文注释（306 行）
+
+项目作者：chara201x、qzgeek（黔中极客）、CatXiaolan。本文档按「安装 → 升级 → 配置 → 使用」组织，首次部署可直接从下方快速开始。
 
 ## 支持的 Minecraft 版本
 
@@ -46,75 +53,18 @@ v0.10 保留并扩展了旧版本自动升级系统：
 
 无需手动操作，安装新版 jar 后直接重启即可。
 
-### QQ 官方机器人接入
+### QQ 机器人
 
-两种 QQ 通道互相独立，可同时启用，共用同一套命令、白名单与数据库：
+LuoOS 提供两套互相独立的 QQ 机器人通道，均可与认证、白名单、资源世界等功能同时使用：
 
-- 私人机器人（OneBot）：`qq_bot.private-bot.enable`
-- 官方机器人（QQ 开放平台）：`qq_bot.official-bot.enable`
+- **私人机器人（OneBot）**：用自己的 QQ 号搭建，配合 NapCat 等框架
+- **官方机器人（QQ 开放平台）**：官方接口，更稳定，需开发者资质
 
-两者都必须先打开总开关 `qq_bot.enable`。私聊机器人需要 QQ 框架用 WS 正向连接到本插件；官Q需要开放平台凭据与发件邮箱。
+两者可同时启用，共用同一套命令、白名单与数据库。完整配置与命令说明见 **第四章：QQ 机器人**。
 
-```yaml
-qq_bot:
-  enable: true
-  private-bot:
-    enable: true
-    host: 0.0.0.0
-    port: 35013
-    access_token: "与框架一致"
-    qq_groups: []
-    card-cmd: ["服务器还活着吗", "状态", "服务器状态", "status", "state"]
-  official-bot:
-    enable: true
-    app_id: "你的AppID"
-    app_secret: "你的AppSecret"
-    # 官Q状态卡片命令独立配置，可与传统机器人不同
-    card-cmd: ["服务器还活着吗", "状态", "服务器状态", "status", "state"]
-    code_digits: 6
-    code_expire_minutes: 10
-    smtp:
-      host: "smtp.qq.com"
-      port: 465
-      username: "发件邮箱"
-      password: "邮箱授权码"
-      from: "发件邮箱"
-      starttls: false
-```
+**升级到 v0.10 注意**：配置结构由扁平键改为分组（`setting` / `account` / `qq_bot` / `status-card`），插件会自动兼容旧键名，直接替换 jar 即可。若你的配置里同时存在新旧两种写法，以分组键为准。
 
-官Q不限制群聊：不再需要填写群 OpenID 列表。凭据只存服务器本地，切勿提交版本库。
-
-在 QQ 机器人开放平台开启群聊消息事件与对应 intents。群里 @ 机器人发送 `绑定QQ <QQ号>`，验证码会发到 `<QQ号>@qq.com`；再 @ 机器人发送 `验证码 <验证码>` 完成绑定。只有验证成功后，OpenID 才会映射为命令处理器使用的 QQ 号。
-
-验证码只保存 SHA-256 摘要，超时失效。SMTP 465 端口自动使用隐式 TLS，其他端口可按 `starttls` 强制 STARTTLS，均带网络超时。
-
-**身份安全规则：**
-- 邮件服务接受发信后，仅写 `qq_official_pending` 待验证记录；不会写正式绑定，也不会永久占用该 QQ。
-- 正确且未过期的验证码经过校验后，事务内写入 `qq_official_bindings` 并消费待验证记录。验证码不可重复使用。
-- 错码、过期、邮件失败、数据库失败均不授予身份；每次申请最多校验5次；同一 openid 或收件 QQ 发码冷却60秒。
-- 已确认的身份不允许直接覆盖。重启不会把待验证申请变成已确认绑定。
-- 旧版本错误写入正式表、且 `code_hash` 非空的未验证记录，会在事务内原样归档至 `qq_official_binding_archive` 并移出正式表，需重新申请；原已确认记录保留。迁移失败时不启用官方身份查询，不影响原 OneBot 白名单表。
-
-**命令与回复对齐：**
-- `help / 帮助 / 菜单 / 命令`：完整帮助、邮箱验证流程、管理员命令。群内每条命令都需要 @机器人。
-- 状态卡片：各自读取所配置的 `card-cmd`，并支持 `服务器状态 / 服务器还活着吗`。复用传统状态卡（1500×700 PNG、服务器信息、在线玩家、自定义背景），通过官方分片上传接口发送图片，不需要图床；上传或发送失败时回复文字状态。图片分片序号兼容从 0 或 1 开始。
-- `看看人机 / 在线人机 / 人机列表`：复用在线人机列表。帮助、状态、人机列表无需绑定；账号查询、白名单和管理命令必须先验证邮箱，即使是群管理员也不能绕过。
-- 白名单申请、查询、删除、管理员封禁/解封/封禁列表：复用同一命令处理器与仓储。官方通道用中文文字代替 OneBot 的表情回应；数据库写失败不得回报成功。
-- 每个请求独立保留 `msg_id` 和递增 `msg_seq`，不再拿群里“最后一条消息”作为其他命令的回复目标；重复投递不重复执行，群标识不使用有碰撞风险的字符串哈希。
-- **官Q不支持 @目标**：官方群事件不提供被@成员的 QQ 号（无 mentions、content 中 @ 文本也被平台抹除），因此一律提示直接填写 QQ 号。管理命令缺目标时同样给出明确用法，不会只回“操作失败”。
-- `重置密码 <账号名>`：新密码通过邮件发送到 `<QQ号>@qq.com`，邮件中提示使用 `/changepassword <旧密码> <新密码>`。群内回复不含密码；邮件发送失败会回滚密码，不会出现“改了却收不到”。
-
-**配置结构说明：** `setting` / `account` / `account-binder` / `qq_bot` / `status-card` 为分组配置；旧的扁平键名（如 `bot.enabled`、`official_qq.enabled`）在内存中自动映射为对应分组键，两种写法都可用，升级不会导致功能静默失效。
-
-**当前能力边界：**已核实官方群事件提供 `member_role`，本实现读取它区分成员、管理员和群主。成员进退群自动冻结/恢复尚未适配官方事件，不能据此承诺与 OneBot 完全等价；长时间 token 刷新/自动重连仍需完善。图片与单聊受开放平台权限、审核和消息窗口限制；本地 HTTP 协议测试不等于腾讯真实群验收。不能将当前版本视为已完成全功能生产验收。
-
-官方机器人接入初版贡献者：CatXiaolan（猫小澜）。本轮对齐保留原贡献者署名，不改白名单/认证数据的所有权规则。
-
-验证码仓储的隔离回归测试见 `tests/README.md`。测试只使用临时 SQLite 库，不需要 QQ 或邮件密钥。
-
-官方接口文档：<https://bot.q.qq.com/wiki/develop/api-v2/>。当前 WebSocket 文档位于 `dev-prepare/event-emit/websocket.html`，其中 Identify 使用 `QQBot {AccessToken}` 和 `shard: [0, 1]`，不要混用旧版 Token 示例。
-
-**v0.10 资源世界兼容升级**：旧版本的 `plugins/luoos/config.yml`、`player_data.db`、Worlds 世界目录均可直接保留。升级启动时会优先识别 `world/dimensions/luoos_resource/res_world` 等既有目录；如果旧版本未保存 `resourceWorld.currentSeed`，LuoOS 会从现有世界恢复种子，并将未导入的 Worlds 世界重新登记后加载。不会因为重启而删除或重新生成旧资源世界。
+**资源世界数据保留**：旧版 `config.yml`、`player_data.db` 与 Worlds 世界目录均可直接沿用。启动时会优先识别 `world/dimensions/luoos_resource/` 下的既有目录；若旧配置未保存 `resourceWorld.currentSeed`，会从现有世界恢复种子，不会因重启而删除或重新生成。
 
 ---
 
@@ -123,19 +73,25 @@ qq_bot:
 ### 基本配置
 
 ```yaml
-enableAuthentication: true   # 启用登录认证
-language: zh_cn              # 语言
-loginTimeout: 60             # 登录超时(秒)
-minPasswordLength: 4         # 密码最小长度
-maxPasswordLength: 32        # 密码最大长度
+setting:
+  language: zh_cn            # 语言
+
+account:
+  enableAuthentication: true # 启用登录认证
+  loginTimeout: 120          # 登录超时(秒)
+  minPasswordLength: 4       # 密码最小长度
+  maxPasswordLength: 32      # 密码最大长度
 ```
+
+完整配置项与逐条说明见插件生成的 `plugins/luoos/config.yml`。
 
 ### 离线玩家
 
 ```yaml
-allowOfflinePlayers: true    # 允许离线玩家进入在线模式服
-allowMoreOfflineUsernameCharacters: true  # 允许中文名
-separateOnlineOfflineAccounts: true       # 同名正版/离线数据分离
+account:
+  allowOfflinePlayers: true                   # 允许离线玩家进入在线模式服
+  allowMoreOfflineUsernameCharacters: true    # 允许中文名
+  separateOnlineOfflineAccounts: true         # 同名正版/离线数据分离
 ```
 
 ### 绕过登录
@@ -143,9 +99,10 @@ separateOnlineOfflineAccounts: true       # 同名正版/离线数据分离
 某些玩家（如假人、Bot）不需要登录，配置白名单：
 
 ```yaml
-loginBypassIps:
-  - "127.0.0.1"
-  - "192.168.1.100"
+account:
+  loginBypassIps:
+    - "127.0.0.1"
+    - "192.168.1.100"
 
 loginBypassNames:
   - "BOT_"      # 前缀匹配，所有 BOT_ 开头的玩家无需登录
@@ -173,64 +130,132 @@ bindingStorage: sqlite       # 存储方式: sqlite 或 mysql
 
 ---
 
-## 四、QQ机器人（OneBot）
+## 四、QQ 机器人
 
-### 配置
+两种通道互相独立，可同时启用，共用同一套命令、白名单与数据库：
+
+| 通道 | 适用场景 | 配置开关 |
+|------|---------|---------|
+| 私人机器人（OneBot） | 用自己 QQ 号搭建，需配合 NapCat 等框架 | `qq_bot.private-bot.enable` |
+| 官方机器人（QQ 开放平台） | 官方接口，更稳定，需开发者资质 | `qq_bot.official-bot.enable` |
+
+两者都必须先打开总开关 `qq_bot.enable`。
+
+### 私人机器人配置
 
 ```yaml
-bot:
-  enabled: true
-  host: 0.0.0.0              # WebSocket 监听地址
-  port: 10100                # 监听端口
-  access_token: "你的token"   # 与QQ框架一致
-  qq_groups: [123456]        # 允许的群聊列表
-  max_per_qq: 3              # 每个QQ最大白名单数
-  allowed_id_chars: "a-zA-Z0-9_-."   # 允许的ID字符
-  max_id_length: 16          # ID最大长度
-  status_trigger: "服务器还活着吗"    # 触发状态卡片
-  rate_limit_max: 5          # 频率限制(次)
-  rate_limit_window: 60      # 时间窗口(秒)
-  reply_delay_min_ms: 1000   # 回复最小延迟
-  reply_delay_max_ms: 2000   # 回复最大延迟
-  debug_log: false           # 调试日志
-  mc_display_name: "LuoOS服务器"
-  mc_description: "欢迎来到LuoOS"
-  mc_display_ip: "127.0.0.1:25565"
+qq_bot:
+  enable: true
+  private-bot:
+    enable: true
+    host: 0.0.0.0
+    port: 35013
+    access_token: "与框架中的令牌一致"
+    qq_groups: [123456, 789012]      # 留空 [] 表示允许所有群（不推荐）
+    max_per_qq: 3
+    card-cmd:                        # 触发状态卡片的词
+      - "服务器还活着吗"
+      - "状态"
+      - "服务器状态"
+      - "status"
+      - "state"
+    rate-limit-window: 60            # 频率限制窗口（秒）
+    rate-limit-max: 10               # 窗口内最多处理多少条
+    reply-delay-min-ms: 500          # 拟人化回复延迟（毫秒）
+    reply-delay-max-ms: 2000
+    debug_log: false
 ```
 
-QQ框架（NapCat/LLOneBot）中配置反向WebSocket地址为 `ws://服务器IP:10100`。
+本插件是 WebSocket **服务端**，QQ 框架需用「反向 WS」主动连接：
+
+```
+NapCat 配置反向 WebSocket 地址为  ws://服务器IP:35013
+并确保 access_token 与本配置完全一致，否则会被拒绝连接。
+```
+
+### 官方机器人配置
+
+```yaml
+qq_bot:
+  enable: true
+  official-bot:
+    enable: true
+    app_id: "开放平台获取的 AppID"
+    app_secret: "开放平台获取的 AppSecret"
+    card-cmd:                        # 官方通道独立配置，可与私人机器人不同
+      - "服务器还活着吗"
+      - "状态"
+    groups: []                       # 留空表示不限制群聊
+    code_digits: 6
+    code_expire_minutes: 10
+    smtp:                            # 官方通道必须配置，用于发送验证码
+      host: smtp.126.com             # 必须与发件邮箱服务商一致
+      port: 465                      # 465 为 SSL；587 为 STARTTLS
+      username: "someone@126.com"
+      password: "邮箱授权码"          # 不是登录密码，需在邮箱设置中开启 SMTP 后生成
+      from: "someone@126.com"
+      starttls: false                # 465 端口无需开启
+```
+
+在 QQ 开放平台开启群聊消息事件与对应 intents。绑定流程：
+
+1. 群里 @机器人 发送 `绑定QQ <QQ号>`
+2. 验证码发送到 `<QQ号>@qq.com`
+3. @机器人 发送 `验证码 <验证码>` 完成绑定
+
+**安全说明**：验证码只保存 SHA-256 摘要，10 分钟过期，每次申请最多校验 5 次；错误、过期、邮件失败、数据库失败均不授予身份；已确认的身份不可被覆盖，重启也不会把待验证申请变成正式绑定。
+
+> `qq_bot.official-bot.groups` 留空即允许所有群；若需限制，填入官方事件中的 group_openid（**不是** QQ 群号）。
 
 ### 群聊命令
 
+两条通道命令一致，区别仅在**个别交付方式**（见下）。
+
+玩家命令：
+
 | 命令 | 说明 |
 |------|------|
-| `服务器还活着吗` / `服务器状态` | 返回状态卡片 |
-| `申请白名单 <ID>` / `白名单 <ID>` / `添加白名单 <ID>` | 申请白名单 |
-| `删除白名单 <ID>` / `移除白名单 <ID>` | 删除自己的白名单 |
-| `查询白名单` / `查询` / `查看` [name/QQ] | 查看白名单 |
-| `重置密码 <账号名>` | 重置名下账号密码（新密码通过QQ私聊发送，需开启允许陌生人私聊） |
-| `看看人机` / `在线人机` / `人机列表` | 查看在线假人列表 |
-| `help` / `帮助` / `菜单` | 显示帮助 |
+| `申请白名单 <游戏ID>` | 申请白名单 |
+| `删除白名单 <游戏ID>` | 删除自己的白名单 |
+| `查询白名单` | 查看自己的白名单 |
+| `查询白名单 <QQ号/ID>` | 查看指定对象 |
+| `重置密码 <账号名>` | 重置名下账号密码（送达方式见下） |
+| `服务器状态` | 返回状态卡片 |
+| `看看人机` | 查看在线假人列表 |
+| `帮助` | 显示帮助 |
 
 管理员命令：
 
-| 命令 | 说明 |
-|------|------|
-| `封禁/ban @QQ [时长]` | 封禁用户 |
-| `解封/unban @QQ` | 解禁用户 |
-| `删除 @QQ <ID>` | 删除指定用户的白名单 |
-| `封禁列表` / `查看封禁列表` / `banlist` / `封神榜` | 查看封禁列表 |
+| 传统通道 | 官方通道 | 说明 |
+|---------|---------|------|
+| `封禁 <@某人\|QQ号> [时长]` | `封禁 <QQ号> [时长]` | 封禁用户（如 `1h`、`3天`） |
+| `解封 <@某人\|QQ号>` | `解封 <QQ号>` | 解禁用户 |
+| `删除 <@某人\|QQ号> [ID]` | `删除 <QQ号> [游戏ID]` | 删除该用户的白名单 |
+| `封禁列表` | `封禁列表` | 查看封禁列表 |
+
+> **官方通道不支持 @ 目标**：官方群事件不提供被@成员的 QQ 号（连 @ 文本也会被平台抹除），因此请直接填写 QQ 号。填了 @ 会收到明确提示而不是静默失败。
+
+### 两通道的行为差异
+
+| 项目 | 传统通道（OneBot） | 官方通道 |
+|------|------------------|---------|
+| 触发方式 | 直接发送命令 | 每条命令都需 @机器人 |
+| 身份验证 | 无需绑定 | 需邮箱验证（帮助/状态/人机列表除外） |
+| `重置密码` 送达 | **QQ 私聊** | **邮件到 `<QQ号>@qq.com`** |
+| 管理员 @目标 | 支持 | 不支持，须填 QQ 号 |
+| 回复延迟 | 可配置拟人化延迟 | 无延迟，立即回复 |
+| 状态卡片触发词 | `private-bot.card-cmd` | `official-bot.card-cmd`（独立配置） |
+| 表情回应 | 支持 | 改为文字提示 |
+
+两种送达方式都会在**投递失败时自动回滚密码**，不会出现「密码已改但收不到」。`重置密码` 仅限重置自己名下（已绑定白名单）的账号，同一 QQ 每 60 秒限一次。
 
 ### 退群/踢群白名单冻结
 
-- 玩家主动退群（leave）或被管理员踢出群（kick）时，其名下所有白名单账号**自动冻结**：
-  - 从服务器白名单移除，无法再登录
-  - 若正在游戏内，会被踢出并提示
-  - `查询白名单` 中该账号会显示 `(已冻结)`
-- 玩家**重新进群**后，其名下冻结的白名单账号**自动恢复**。
+- 玩家主动退群或被踢出群时，其名下所有白名单账号**自动冻结**：从服务器白名单移除、无法登录，游戏内则被踢出；`查询白名单` 中显示 `(已冻结)`。
+- 玩家**重新进群**后自动恢复。
 - 冻结状态记录在 `qq_whitelist.frozen` 字段（旧库自动补列，无需手动迁移）。
 
-> 说明：`重置密码` 仅限玩家重置自己名下（已绑定白名单）的账号，新密码为 6 位随机字母数字，通过 QQ 私聊发送，不会在群里展示；若私聊发送失败则自动回滚，不会把玩家锁在门外。同一 QQ 每 60 秒限重置一次。
+> 该功能依赖群成员进退通知，目前仅在传统通道生效。
 
 ---
 
@@ -333,7 +358,7 @@ resourceWorld:
 ## 七、维护模式
 
 ```yaml
-maintenance: false  # 维护模式开关
+maintenance: false  # 维护模式开关（顶层配置项）
 ```
 
 命令：
@@ -350,8 +375,11 @@ maintenance: false  # 维护模式开关
 LuoOS 的登录白名单统一由数据库 `qq_whitelist` 管理，QQ 机器人、管理员命令和登录拦截都通过同一个 `FoliaWhitelistRepository` 数据访问模块操作，功能模块不再直接执行白名单 SQL。
 
 ```yaml
-enableWhitelist: true  # 启用旧版 JSON 白名单兼容检查；数据库白名单始终由 qq_whitelist 管理
+account:
+  enableWhitelist: true  # 启用旧版 JSON 白名单兼容检查；数据库白名单始终由 qq_whitelist 管理
 ```
+
+注意：白名单判定为双重条件——本项开启且玩家在 JSON 白名单中，**或**数据库 `qq_whitelist` 表存在任意记录（此时自动进入白名单模式）。因此只要有玩家通过 QQ 机器人申请过白名单，未申请者就会被拒绝进入。
 
 管理员命令（OP 或拥有 `luoos.admin` 权限）：
 
@@ -370,7 +398,7 @@ enableWhitelist: true  # 启用旧版 JSON 白名单兼容检查；数据库白�
 ### 封禁系统
 
 ```yaml
-enableCustomBan: true
+enableCustomBan: true   # 顶层配置项
 ```
 
 命令：`/los ban/unban/banlist <玩家>`
@@ -379,7 +407,7 @@ enableCustomBan: true
 
 用于正版/离线账号间数据转移：
 ```yaml
-enablePlayerDataMigration: false
+enablePlayerDataMigration: false   # 顶层配置项
 migrationBanSeconds: 30
 ```
 
@@ -388,26 +416,28 @@ migrationBanSeconds: 30
 ### TPS 显示
 
 ```yaml
-enableAutoLogTps: true
+enableAutoLogTps: true   # 顶层配置项
 autoLogTpsDelayTicks: 20
 ```
 
 ### 配方同步
 
 ```yaml
-enableRecipeViewerSync: true  # 1.21.2+
+enableRecipeViewerSync: true  # 1.21.2+，顶层配置项
 ```
 
 ### 会话限制
 
 ```yaml
-maxConcurrentSessionsPerIp: -1  # 同IP最大在线数, -1=不限
+account:
+  maxConcurrentSessionsPerIp: -1  # 同IP最大在线数, -1=不限
 ```
 
 ### 登录保护
 
 ```yaml
-usernameLoginFailureLimit: 5          # 连续失败次数
+account:
+  usernameLoginFailureLimit: 5          # 连续失败次数
 usernameLoginFailureLockSeconds: 30   # 锁定时间(秒)
 ```
 
@@ -424,5 +454,5 @@ usernameLoginFailureLockSeconds: 30   # 锁定时间(秒)
 ## 项目信息
 
 - 作者: chara201x, qzgeek (黔中极客), CatXiaolan
-- GitHub: https://github.com/qzgeek/heos-public
+- GitHub: https://github.com/qzgeek/LuoOS
 - 分支: main | 标签: v0.10
