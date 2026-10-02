@@ -376,6 +376,7 @@ public final class HeosFoliaPlugin extends JavaPlugin {
                         cfgInt("qq_bot.official-bot.code_expire_minutes", "official_qq.code_expire_minutes", 10),
                         // 官Q不限制群聊：groups 留空即允许所有群，避免平台OpenID变动导致失效。
                         java.util.Set.of(), handler::handle);
+                officialQQBot.debugLog = cfgBool("qq_bot.official-bot.debug_log", "official_qq.debug_log", false);
                 new Thread(officialQQBot::start, "LuoOS-Official-QQ").start();
             } catch (Exception e) { getLogger().severe("Failed to start official QQ bot: " + e.getMessage()); }
         }

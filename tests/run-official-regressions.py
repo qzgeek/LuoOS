@@ -21,7 +21,7 @@ for module in modules:
     if files:
         deps.append(str(max(files, key=lambda f: f.stat().st_mtime)))
 cp = os.pathsep.join([str(jar), *deps])
-classes = ['OfficialBindingRegression', 'heos.folia.bot.OfficialMediaRegression', 'heos.folia.bot.CommandParityRegression']
+classes = ['OfficialBindingRegression', 'heos.folia.bot.OfficialMediaRegression', 'heos.folia.bot.CommandParityRegression', 'heos.folia.bot.OfficialAdaptRegression']
 sources = [str(root / 'tests' / (c.rsplit('.', 1)[-1] + '.java')) for c in classes]
 with tempfile.TemporaryDirectory(prefix='luoos-regression-classes-') as out:
     subprocess.run(['javac', '-encoding', 'UTF-8', '-cp', cp, '-d', out, *sources], check=True)

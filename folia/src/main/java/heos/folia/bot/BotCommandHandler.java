@@ -261,7 +261,8 @@ public class BotCommandHandler {
      */
     private void handleNotice(OneBotEvent event) {
         long groupId = event.groupId();
-        if (!isAllowed(groupId)) return;
+        // 官方通道的群限制在网关层按 group_openid 过滤，这里不再用QQ群号比对
+        if (!event.isOfficial() && !isAllowed(groupId)) return;
         String noticeType = event.noticeType();
         long targetQq = event.userId();
         String subType = event.subType();
@@ -280,30 +281,41 @@ public class BotCommandHandler {
         try {
             List<BotDb.WhitelistEntry> entries = botDb.getWhitelistEntries(qq);
             if (entries.isEmpty()) return;
-            org.bukkit.Bukkit.getGlobalRegionScheduler().run(
-                    org.bukkit.Bukkit.getPluginManager().getPlugin("luoos"),
-                    task -> {
-                        for (BotDb.WhitelistEntry e : entries) {
-                            try {
-                                org.bukkit.OfflinePlayer op = org.bukkit.Bukkit.getOfflinePlayer(e.playerName);
-                                if (op != null) op.setWhitelisted(false);
-                            } catch (Exception ex) {
-                                logger.warning("[BotHandler] freeze unwhitelist failed for " + e.playerName + ": " + ex.getMessage());
-                            }
-                        }
-                        // Kick any online players under this QQ — frozen means not allowed to play
-                        for (var p : org.bukkit.Bukkit.getOnlinePlayers()) {
+            // 先在数据库标记冻结：这是拦截登录的依据，必须优先执行，
+            // 不能放在服务器调度之后——调度失败会导致白名单未被冻结、玩家仍可进入。
+            int n = botDb.freezeWhitelist(qq);
+            try {
+                org.bukkit.Bukkit.getGlobalRegionScheduler().run(
+                        org.bukkit.Bukkit.getPluginManager().getPlugin("luoos"),
+                        task -> {
                             for (BotDb.WhitelistEntry e : entries) {
-                                if (e.playerName.equalsIgnoreCase(p.getName())) {
-                                    p.kickPlayer("你已退出QQ群，白名单已被冻结，重新进群后自动恢复。");
-                                    break;
+                                try {
+                                    org.bukkit.OfflinePlayer op = org.bukkit.Bukkit.getOfflinePlayer(e.playerName);
+                                    if (op != null) op.setWhitelisted(false);
+                                } catch (Exception ex) {
+                                    logger.warning("[BotHandler] freeze unwhitelist failed for " + e.playerName + ": " + ex.getMessage());
                                 }
                             }
-                        }
-                    });
-            int n = botDb.freezeWhitelist(qq);
-            logger.info("[BotHandler] QQ" + qq + " left/kicked from group " + groupId + " — frozen " + n + " whitelist entries");
-            event.sendGroupMessage(groupId, "QQ" + qq + " 已退群/被移出群，其名下 " + n + " 个白名单账号已冻结，重新进群后自动恢复。");
+                            // Kick any online players under this QQ — frozen means not allowed to play
+                            for (var p : org.bukkit.Bukkit.getOnlinePlayers()) {
+                                for (BotDb.WhitelistEntry e : entries) {
+                                    if (e.playerName.equalsIgnoreCase(p.getName())) {
+                                        p.kickPlayer("你已退出QQ群，白名单已被冻结，重新进群后自动恢复。");
+                                        break;
+                                    }
+                                }
+                            }
+                        });
+            } catch (Exception ex) {
+                // 数据库已冻结，服务器侧同步失败只影响在线玩家即时踢出
+                logger.warning("[BotHandler] freeze scheduler failed for QQ" + qq + ": " + ex.getMessage());
+            }
+            logger.info("[BotHandler] QQ" + qq + " 退群/被移出" + groupLabel(event, groupId)
+                    + " — 已冻结 " + n + " 个白名单账号");
+            // 官方通道的被动回复窗口只对触发事件生效，成员进退群无 msg_id，无法主动播报。
+            if (!event.isOfficial()) {
+                event.sendGroupMessage(groupId, "QQ" + qq + " 已退群/被移出群，其名下 " + n + " 个白名单账号已冻结，重新进群后自动恢复。");
+            }
         } catch (Exception e) {
             logger.warning("[BotHandler] freeze failed for QQ" + qq + ": " + e.getMessage());
         }
@@ -316,27 +328,51 @@ public class BotCommandHandler {
             List<BotDb.WhitelistEntry> frozen = new ArrayList<>();
             for (BotDb.WhitelistEntry e : entries) if (e.frozen) frozen.add(e);
             if (frozen.isEmpty()) return;
+            // 同样先解冻数据库，再同步服务器白名单
             int n = botDb.unfreezeWhitelist(qq);
-            org.bukkit.Bukkit.getGlobalRegionScheduler().run(
-                    org.bukkit.Bukkit.getPluginManager().getPlugin("luoos"),
-                    task -> {
-                        for (BotDb.WhitelistEntry e : frozen) {
-                            try {
-                                org.bukkit.OfflinePlayer op = org.bukkit.Bukkit.getOfflinePlayer(e.playerName);
-                                if (op != null) op.setWhitelisted(true);
-                            } catch (Exception ex) {
-                                logger.warning("[BotHandler] restore whitelist failed for " + e.playerName + ": " + ex.getMessage());
+            try {
+                org.bukkit.Bukkit.getGlobalRegionScheduler().run(
+                        org.bukkit.Bukkit.getPluginManager().getPlugin("luoos"),
+                        task -> {
+                            for (BotDb.WhitelistEntry e : frozen) {
+                                try {
+                                    org.bukkit.OfflinePlayer op = org.bukkit.Bukkit.getOfflinePlayer(e.playerName);
+                                    if (op != null) op.setWhitelisted(true);
+                                } catch (Exception ex) {
+                                    logger.warning("[BotHandler] restore whitelist failed for " + e.playerName + ": " + ex.getMessage());
+                                }
                             }
-                        }
-                    });
-            logger.info("[BotHandler] QQ" + qq + " rejoined group " + groupId + " — restored " + n + " whitelist entries");
-            event.sendGroupMessage(groupId, "QQ" + qq + " 已重新进群，其名下 " + n + " 个白名单账号已恢复。");
+                        });
+            } catch (Exception ex) {
+                logger.warning("[BotHandler] restore scheduler failed for QQ" + qq + ": " + ex.getMessage());
+            }
+            logger.info("[BotHandler] QQ" + qq + " 重新进群" + groupLabel(event, groupId)
+                    + " — 已恢复 " + n + " 个白名单账号");
+            if (!event.isOfficial()) {
+                event.sendGroupMessage(groupId, "QQ" + qq + " 已重新进群，其名下 " + n + " 个白名单账号已恢复。");
+            }
         } catch (Exception e) {
             logger.warning("[BotHandler] restore failed for QQ" + qq + ": " + e.getMessage());
         }
     }
 
     // ======================== Helpers ========================
+
+    /**
+     * 日志用的群标识。
+     * 官方通道使用 group_openid（无 QQ 群号，内部伪ID 如 -1 会造成误解），
+     * 传统通道使用 QQ 群号。
+     */
+    private String groupLabel(OneBotEvent event, long groupId) {
+        if (event.isOfficial()) {
+            String openid = event.officialGroupOpenid();
+            if (openid != null && !openid.isEmpty()) {
+                return "【官方群 " + openid.substring(0, Math.min(8, openid.length())) + "…】";
+            }
+            return "【官方群】";
+        }
+        return "（群 " + groupId + "）";
+    }
 
     private boolean isAllowed(long groupId) {
         if (allowedGroups.length == 0) return true;

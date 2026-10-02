@@ -66,6 +66,27 @@ public final class OfficialQQBot {
     });
     private volatile String token;
     private volatile WebSocketClient socket;
+    private volatile String gateway;
+    /** 会话 id 与事件序号：用于断线后 resume 补发遗漏事件。 */
+    private volatile String sessionId;
+    private volatile long tokenExpiresAt;
+    private volatile boolean stopping;
+    private final java.util.concurrent.atomic.AtomicInteger reconnectAttempts = new java.util.concurrent.atomic.AtomicInteger();
+    private volatile java.util.concurrent.ScheduledFuture<?> heartbeatFuture;
+    private final ScheduledExecutorService reconnectExecutor = Executors.newSingleThreadScheduledExecutor(r -> {
+        Thread thread = new Thread(r, "LuoOS-Official-QQ-Reconnect");
+        thread.setDaemon(true);
+        return thread;
+    });
+    private static final int INTENT_GROUP_AND_C2C = 1 << 25;
+    private static final int INTENT_GROUP_MEMBER = 1 << 24;
+    private static final int MAX_RECONNECT_ATTEMPTS = 10;
+    private static final long RECONNECT_BASE_MS = 3000L;
+    private static final long RECONNECT_MAX_MS = 300000L;
+    /** 令牌提前刷新余量：官方令牌约 2 小时有效，余量取 10 分钟。 */
+    private static final long TOKEN_REFRESH_MARGIN_MS = 600_000L;
+    /** 调试日志开关，由插件启动时注入。 */
+    public volatile boolean debugLog = false;
 
     public OfficialQQBot(Logger logger, String appId, String appSecret, String apiBase, String tokenBase, String gatewayUrl,
                          FoliaWhitelistRepository repository, SmtpCodeService mail, int codeDigits,
@@ -95,7 +116,11 @@ public final class OfficialQQBot {
     }
 
     public void stop() {
+        stopping = true;
         commands.shutdownNow();
+        reconnectExecutor.shutdownNow();
+        java.util.concurrent.ScheduledFuture<?> beat = heartbeatFuture;
+        if (beat != null) beat.cancel(false);
         heartbeatExecutor.shutdownNow();
         WebSocketClient current = socket;
         if (current != null) current.close();
@@ -118,6 +143,9 @@ public final class OfficialQQBot {
             throw new IllegalStateException("获取官方访问凭证失败，HTTP " + response.statusCode()
                     + "，code=" + code + "，message=" + message);
         }
+        // 官方令牌默认约 2 小时有效；若响应带 expires_in 则按其计算，重连前据此刷新。
+        long expiresIn = result.has("expires_in") ? result.get("expires_in").getAsLong() : 7200L;
+        tokenExpiresAt = System.currentTimeMillis() + Math.max(60L, expiresIn) * 1000L;
         return result.get("access_token").getAsString();
     }
 
@@ -133,17 +161,78 @@ public final class OfficialQQBot {
     }
 
     private void connect(String url) {
+        gateway = url;
         socket = new WebSocketClient(URI.create(url)) {
             @Override public void onOpen(ServerHandshake handshake) { logger.info("[LuoOS-QQ] Official QQ Gateway connected"); }
             @Override public void onMessage(String text) {
                 try { onGatewayMessage(gson.fromJson(text, JsonObject.class)); }
                 catch (RuntimeException e) { logger.warning("[LuoOS-QQ] 无法处理网关消息: " + e.getClass().getSimpleName()); }
             }
-            @Override public void onClose(int code, String reason, boolean remote) { logger.warning("[LuoOS-QQ] Gateway disconnected: " + reason); }
+            @Override public void onClose(int code, String reason, boolean remote) {
+                logger.warning("[LuoOS-QQ] Gateway disconnected: code=" + code + " reason=" + reason);
+                scheduleReconnect(code);
+            }
             @Override public void onError(Exception ex) { logger.warning("[LuoOS-QQ] Gateway error: " + ex.getMessage()); }
         };
         socket.addHeader("Authorization", "QQBot " + token);
         socket.connect();
+    }
+
+    /**
+     * 断线重连。
+     * 4xxx 中不可重试的错误码直接放弃，避免无意义的重连风暴；
+     * 其余情况按退避策略重连，并能 resume 时优先 resume（补发遗漏事件）。
+     */
+    /**
+     * 该关闭码是否值得重连。
+     * 官方文档中 4001/4002/4010-4014/4914/4915 属于不可恢复错误，
+     * 重连不会成功（例如机器人已下架或封禁），继续重连只是徒劳刷日志。
+     */
+    static boolean isRetryableClose(int closeCode) {
+        if (closeCode == 4001 || closeCode == 4002) return false;
+        if (closeCode >= 4010 && closeCode <= 4014) return false;
+        return closeCode != 4914 && closeCode != 4915;
+    }
+
+    private void scheduleReconnect(int closeCode) {
+        if (stopping) return;
+        if (!isRetryableClose(closeCode)) {
+            logger.severe("[LuoOS-QQ] 网关返回不可恢复错误码 " + closeCode + "，已停止重连。请检查机器人状态或权限。");
+            return;
+        }
+        int attempt = reconnectAttempts.incrementAndGet();
+        if (attempt > MAX_RECONNECT_ATTEMPTS) {
+            logger.severe("[LuoOS-QQ] 连续重连 " + MAX_RECONNECT_ATTEMPTS + " 次仍失败，已停止。请检查网络或重新配置。");
+            return;
+        }
+        long delay = Math.min(RECONNECT_BASE_MS * (1L << Math.min(attempt - 1, 5)), RECONNECT_MAX_MS);
+        logger.info("[LuoOS-QQ] 将在 " + (delay / 1000) + " 秒后尝试第 " + attempt + " 次重连"
+                + (canResume() ? "（含会话恢复）" : ""));
+        try {
+            reconnectExecutor.schedule(this::doReconnect, delay, TimeUnit.MILLISECONDS);
+        } catch (java.util.concurrent.RejectedExecutionException ignored) {
+            // 正在关闭
+        }
+    }
+
+    private void doReconnect() {
+        if (stopping) return;
+        try {
+            // 访问令牌有效期有限，重连前确保令牌仍然可用
+            if (tokenExpiresAt > 0 && System.currentTimeMillis() > tokenExpiresAt - TOKEN_REFRESH_MARGIN_MS) {
+                token = getToken();
+            }
+            String target = gateway == null || gateway.isBlank() ? discoverGateway() : gateway;
+            connect(target);
+        } catch (Exception e) {
+            logger.warning("[LuoOS-QQ] 重连失败: " + OfficialQQBot.describe(e));
+            scheduleReconnect(-1);
+        }
+    }
+
+    /** 是否具备 resume 条件：有会话 id 且已收到过事件序号。 */
+    private boolean canResume() {
+        return sessionId != null && !sessionId.isBlank() && sequence.get() >= 0;
     }
 
     private void onGatewayMessage(JsonObject payload) {
@@ -153,13 +242,27 @@ public final class OfficialQQBot {
             JsonObject d = payload.getAsJsonObject("d");
             if (d.has("heartbeat_interval")) {
                 long interval = Math.max(1000L, d.get("heartbeat_interval").getAsLong());
-                heartbeatExecutor.scheduleAtFixedRate(this::sendHeartbeat, interval, interval, TimeUnit.MILLISECONDS);
+                heartbeatFuture = heartbeatExecutor.scheduleAtFixedRate(
+                        this::sendHeartbeat, interval, interval, TimeUnit.MILLISECONDS);
+            }
+            // 有可用会话时优先 resume：网关会补发断线期间遗漏的事件，避免漏处理命令
+            if (canResume()) {
+                JsonObject resume = new JsonObject();
+                resume.addProperty("op", 6);
+                JsonObject data = new JsonObject();
+                data.addProperty("token", "QQBot " + token);
+                data.addProperty("session_id", sessionId);
+                data.addProperty("seq", sequence.get());
+                resume.add("d", data);
+                socket.send(gson.toJson(resume));
+                return;
             }
             JsonObject identify = new JsonObject();
             identify.addProperty("op", 2);
             JsonObject data = new JsonObject();
             data.addProperty("token", "QQBot " + token);
-            data.addProperty("intents", 1 << 25);
+            // 订阅群/C2C 消息事件与群成员进退事件
+            data.addProperty("intents", INTENT_GROUP_AND_C2C | INTENT_GROUP_MEMBER);
             com.google.gson.JsonArray shard = new com.google.gson.JsonArray();
             shard.add(0);
             shard.add(1);
@@ -173,22 +276,94 @@ public final class OfficialQQBot {
             WebSocketClient current = socket;
             if (current != null) current.close();
         } else if (op == 9) {
-            logger.warning("[LuoOS-QQ] Gateway authentication failed");
+            // 4007/4006 允许重新 identify；其余视为鉴权失败
+            logger.warning("[LuoOS-QQ] 会话无效（op 9），将重新鉴权连接");
+            sessionId = null;
+            sequence.set(-1);
+            WebSocketClient current = socket;
+            if (current != null) current.close();
         } else if (op == 0) {
             String event = payload.has("t") ? payload.get("t").getAsString() : "";
-            if ("READY".equals(event)) logger.info("[LuoOS-QQ] 官方机器人鉴权成功，READY");
-            if ("GROUP_AT_MESSAGE_CREATE".equals(event) || "C2C_MESSAGE_CREATE".equals(event)) {
-                JsonObject data = payload.getAsJsonObject("d");
-                try { commands.execute(() -> {
-                    try {
-                        if ("C2C_MESSAGE_CREATE".equals(event)) dispatchPrivateMessage(data);
-                        else dispatchMessage(data);
-                    } catch (RuntimeException e) { logger.warning("[LuoOS-QQ] 命令处理失败: " + e.getClass().getSimpleName()); }
-                }); } catch (java.util.concurrent.RejectedExecutionException e) {
-                    logger.warning("[LuoOS-QQ] 命令队列已满或机器人正在关闭");
-                }
+            handleGatewayEvent(event, payload);
+        }
+    }
+
+    private void handleGatewayEvent(String event, JsonObject payload) {
+        switch (event) {
+            case "READY" -> {
+                reconnectAttempts.set(0);
+                JsonObject d = payload.getAsJsonObject("d");
+                if (d != null && d.has("session_id")) sessionId = d.get("session_id").getAsString();
+                logger.info("[LuoOS-QQ] 官方机器人鉴权成功，READY"
+                        + (sessionId != null ? "（会话 " + sessionId.substring(0, Math.min(8, sessionId.length())) + "）" : ""));
+            }
+            case "RESUMED" -> {
+                reconnectAttempts.set(0);
+                logger.info("[LuoOS-QQ] 会话已恢复，断线期间的事件已补发");
+            }
+            case "GROUP_AT_MESSAGE_CREATE", "C2C_MESSAGE_CREATE", "GROUP_MEMBER_ADD", "GROUP_MEMBER_REMOVE" ->
+                    submitEvent(event, payload.getAsJsonObject("d"));
+            default -> {
+                // 记录所有其他事件类型，便于确认平台实际推送了什么。
+                // 官方文档中部分事件需要单独申请权限，未开通时不会下发，
+                // 静默忽略会让人误以为「功能已实现但没触发」。
+                if (!event.isBlank()) logger.info("[LuoOS-QQ] 收到未处理的事件类型: " + event);
             }
         }
+    }
+
+    private void submitEvent(String event, JsonObject data) {
+        if (data == null) return;
+        try {
+            commands.execute(() -> {
+                try {
+                    switch (event) {
+                        case "C2C_MESSAGE_CREATE" -> dispatchPrivateMessage(data);
+                        case "GROUP_AT_MESSAGE_CREATE" -> dispatchMessage(data);
+                        case "GROUP_MEMBER_ADD" -> dispatchMemberChange(data, false);
+                        case "GROUP_MEMBER_REMOVE" -> dispatchMemberChange(data, true);
+                        default -> { }
+                    }
+                } catch (RuntimeException e) {
+                    logger.warning("[LuoOS-QQ] 事件处理失败(" + event + "): " + e.getClass().getSimpleName()
+                            + ": " + e.getMessage());
+                }
+            });
+        } catch (java.util.concurrent.RejectedExecutionException e) {
+            logger.warning("[LuoOS-QQ] 命令队列已满或机器人正在关闭");
+        }
+    }
+
+    /**
+     * 群成员进退群 → 冻结/恢复白名单。
+     * 官方事件只提供 member_openid，因此仅对「已完成邮箱验证」的成员生效：
+     * 未验证成员本来就是未绑定状态，没有白名单可冻结。
+     */
+    private void dispatchMemberChange(JsonObject data, boolean left) {
+        String group = OfficialQQMedia.required(data, "group_openid");
+        String openid = OfficialQQMedia.required(data, "member_openid");
+        if (!allowedGroups.isEmpty() && !allowedGroups.contains(group)) return;
+        long qq = repository.officialQq(openid).orElse(0L);
+        if (qq <= 0) {
+            // 始终记录：用于确认事件确实到达，以及该成员是否已完成邮箱验证
+            logger.info("[LuoOS-QQ] 群成员" + (left ? "退出" : "加入")
+                    + "：该 openid 尚未绑定身份，跳过白名单" + (left ? "冻结" : "恢复"));
+            return;
+        }
+        JsonObject normalized = new JsonObject();
+        normalized.addProperty("post_type", "notice");
+        normalized.addProperty("notice_type", left ? "group_decrease" : "group_increase");
+        normalized.addProperty("sub_type", left ? "leave" : "approve");
+        normalized.addProperty("group_id", replyGroupId(group));
+        normalized.addProperty("user_id", qq);
+        normalized.addProperty("official_verified", true);
+        handler.accept(new OneBotEvent(normalized, "official:member",
+                (action, params) -> CompletableFuture.completedFuture(new JsonObject())));
+    }
+
+    /** 群 openid 与内部群号的双向映射，复用消息路径的稳定编号。 */
+    private long replyGroupId(String group) {
+        return groupIds.computeIfAbsent(group, ignored -> nextGroupId.getAndDecrement());
     }
 
     private void dispatchMessage(JsonObject data) {

@@ -48,6 +48,9 @@ public class OneBotEvent {
     public long operatorId() { return raw.has("operator_id") ? raw.get("operator_id").getAsLong() : 0; }
     public long messageId() { return raw.has("message_id") ? raw.get("message_id").getAsLong() : 0; }
     public String rawMessage() { return str("raw_message"); }
+    /** 官方通道的群标识（group_openid）；传统通道返回空串。 */
+    public String officialGroupOpenid() { return str("official_group_openid"); }
+
     public JsonObject sender() { return raw.has("sender") ? raw.getAsJsonObject("sender") : null; }
     public String senderRole() {
         JsonObject s = sender();
