@@ -112,7 +112,11 @@ public final class OfficialQQBot {
         JsonObject result = gson.fromJson(response.body(), JsonObject.class);
         if (response.statusCode() != 200 || result == null || !result.has("access_token")
                 || (result.has("code") && result.get("code").getAsInt() != 0)) {
-            throw new IllegalStateException("获取官方访问凭证失败，HTTP " + response.statusCode());
+            // 平台在参数错误时也可能返回 HTTP 200，只报 HTTP 200 无法排查；带上错误码与信息（不含密钥）。
+            String code = result != null && result.has("code") ? String.valueOf(result.get("code")) : "无";
+            String message = result != null && result.has("message") ? String.valueOf(result.get("message")) : "无";
+            throw new IllegalStateException("获取官方访问凭证失败，HTTP " + response.statusCode()
+                    + "，code=" + code + "，message=" + message);
         }
         return result.get("access_token").getAsString();
     }
@@ -260,9 +264,18 @@ public final class OfficialQQBot {
                 long qq = Long.parseLong(parts[1]);
                 if (qq <= 0 || repository.officialQq(openid).isPresent() || repository.officialBindingExistsForQq(qq)) { send(group, "绑定失败！原因：QQ号无效或身份已被绑定，不允许直接覆盖。", messageId); return; }
                 String code = randomCode();
-                if (!repository.requestOfficialCode(openid, qq, hash(code), System.currentTimeMillis() + expiresMinutes * 60_000L,
-                        () -> mail.send(qq + "@qq.com", code))) {
-                    send(group, "绑定申请失败：请求过于频繁、身份已绑定、邮件或数据库异常。请至少60秒后重试；本次未授予身份。", messageId);
+                var result = repository.requestOfficialCodeDetailed(openid, qq, hash(code),
+                        System.currentTimeMillis() + expiresMinutes * 60_000L, () -> mail.send(qq + "@qq.com", code));
+                if (result != heos.folia.storage.OfficialBindingRepository.RequestResult.OK) {
+                    // 按真实原因提示，避免把四种情况混成一句让用户无从判断。
+                    String reason = switch (result) {
+                        case ALREADY_BOUND -> "该QQ号或当前账号已完成绑定，不能重复绑定。";
+                        case RATE_LIMITED -> "请求过于频繁，请至少60秒后再试。";
+                        case MAIL_FAILED -> "验证码邮件发送失败，请联系管理员检查邮箱配置。";
+                        case STORAGE_FAILED -> "数据库写入失败，请稍后重试或联系管理员。";
+                        default -> "请求参数无效，请检查QQ号格式。";
+                    };
+                    send(group, "绑定申请失败：" + reason + " 本次未授予身份。", messageId);
                     return;
                 }
                 send(group, "验证码已发送到‘" + qq + "@qq.com’，" + expiresMinutes + "分钟内有效。接收到验证码后请@我发送‘验证码 " + code.replaceAll(".", "x") + "’以完成绑定", messageId);

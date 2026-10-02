@@ -56,16 +56,14 @@ public final class HeosFoliaPlugin extends JavaPlugin {
      * 兼容旧配置中直接用 bot.enabled 控制 OneBot 的写法。
      */
     private boolean privateBotEnabled() {
-        if (!getConfig().getBoolean("qq_bot.enable", true)) return false;
-        if (getConfig().contains("qq_bot.private-bot.enable"))
-            return getConfig().getBoolean("qq_bot.private-bot.enable", false);
-        return getConfig().getBoolean("bot.enabled", false);
+        if (!cfgBool("qq_bot.enable", null, true)) return false;
+        return cfgBool("qq_bot.private-bot.enable", "bot.enabled", false);
     }
 
     /** 官方QQ机器人是否启用（总开关 + 通道开关）。 */
     private boolean officialBotEnabled() {
-        return getConfig().getBoolean("qq_bot.enable", true)
-                && getConfig().getBoolean("qq_bot.official-bot.enable", false);
+        return cfgBool("qq_bot.enable", null, true)
+                && cfgBool("qq_bot.official-bot.enable", "official_qq.enabled", false);
     }
 
     /**
@@ -74,15 +72,14 @@ public final class HeosFoliaPlugin extends JavaPlugin {
      * 兼容旧键 bot.card-cmd 与 bot.status_trigger。
      */
     private String statusTriggerFor(String channel) {
-        java.util.List<String> commands = getConfig().getStringList("qq_bot." + channel + ".card-cmd");
-        if (commands == null || commands.isEmpty()) commands = getConfig().getStringList("bot." + channel + ".card-cmd");
-        if (commands == null || commands.isEmpty()) commands = getConfig().getStringList("bot.card-cmd");
-        if (commands != null && !commands.isEmpty()) {
+        java.util.List<String> commands = cfgStringList("qq_bot." + channel + ".card-cmd", "bot." + channel + ".card-cmd");
+        if (commands.isEmpty()) commands = cfgStringList("bot.card-cmd", null);
+        if (!commands.isEmpty()) {
             String joined = String.join("|", commands);
             getLogger().info("状态卡片触发词[" + channel + "]：" + joined);
             return joined;
         }
-        String legacy = getConfig().getString("bot.status_trigger", "");
+        String legacy = cfgString("qq_bot." + channel + ".status_trigger", "bot.status_trigger", "");
         return legacy.isBlank() ? "服务器还活着吗" : legacy;
     }
 
@@ -156,35 +153,87 @@ public final class HeosFoliaPlugin extends JavaPlugin {
     }
 
     /**
-     * 只在内存中互相补齐别名键，不写回文件，因此不覆盖用户已有配置。
+     * 读取配置项，同时兼容新版分组键与旧版扁平键。
+     *
+     * 不使用 setDefaults/MemoryConfiguration：Bukkit 的默认值视图在嵌套路径上
+     * 不可靠（曾导致 port 回落到硬编码默认值、app_secret 读成空串），
+     * 因此这里显式按顺序取值，分组键优先、扁平键兜底。
      */
-    private void applyConfigAliases() {
-        for (Map.Entry<String, String> alias : CONFIG_ALIASES.entrySet()) {
-            String flat = alias.getKey(), grouped = alias.getValue();
-            String source = getConfig().contains(grouped) ? grouped
-                    : getConfig().contains(flat) ? flat : null;
-            if (source == null) continue;
-            if (!getConfig().contains(flat)) getConfig().set(flat, getConfig().get(source));
-            if (!getConfig().contains(grouped)) getConfig().set(grouped, getConfig().get(source));
+    private Object configValue(String grouped, String flat) {
+        if (grouped != null && getConfig().contains(grouped)) return getConfig().get(grouped);
+        if (flat != null && getConfig().contains(flat)) return getConfig().get(flat);
+        return null;
+    }
+
+    private String cfgString(String grouped, String flat, String fallback) {
+        Object value = configValue(grouped, flat);
+        return value == null ? fallback : String.valueOf(value);
+    }
+
+    private int cfgInt(String grouped, String flat, int fallback) {
+        Object value = configValue(grouped, flat);
+        if (value instanceof Number n) return n.intValue();
+        try { return value == null ? fallback : Integer.parseInt(String.valueOf(value).trim()); }
+        catch (NumberFormatException e) { return fallback; }
+    }
+
+    private boolean cfgBool(String grouped, String flat, boolean fallback) {
+        Object value = configValue(grouped, flat);
+        if (value instanceof Boolean b) return b;
+        return value == null ? fallback : Boolean.parseBoolean(String.valueOf(value).trim());
+    }
+
+    /**
+     * 按发件邮箱域名推断 SMTP 主机，作为配置缺失时的兜底。
+     * 曾出现默认值硬编码 smtp.qq.com，而账号是 126 邮箱，导致认证 535。
+     */
+    private static String defaultSmtpHost(String username) {
+        String domain = username == null ? "" : username.substring(username.indexOf('@') + 1).toLowerCase();
+        return switch (domain) {
+            case "", "qq.com" -> "smtp.qq.com";
+            default -> "smtp." + domain;
+        };
+    }
+
+    private long[] cfgLongList(String grouped, String flat) {
+        for (String key : new String[]{grouped, flat}) {
+            if (key != null && getConfig().contains(key)) {
+                java.util.List<Long> list = getConfig().getLongList(key);
+                if (list != null && !list.isEmpty()) {
+                    long[] out = new long[list.size()];
+                    for (int i = 0; i < out.length; i++) out[i] = list.get(i);
+                    return out;
+                }
+            }
         }
-        if (getConfig().contains("qq_bot")) getLogger().info("配置：已识别新版分组结构（旧键名兼容可用）。");
+        return new long[0];
+    }
+
+    private java.util.List<String> cfgStringList(String grouped, String flat) {
+        for (String key : new String[]{grouped, flat}) {
+            if (key != null && getConfig().contains(key)) {
+                java.util.List<String> list = getConfig().getStringList(key);
+                if (list != null && !list.isEmpty()) return list;
+            }
+        }
+        return java.util.List.of();
     }
 
     @Override
     public void onEnable() {
         saveDefaultConfig();
-        applyConfigAliases();
+
 
         heos.folia.utils.FoliaMessages.init(this);
         heos.folia.utils.FoliaLogFilterService.installConfiguredFilters(this);
 
         // Storage with optional MySQL
         this.storage = new FoliaStorage(getDataFolder().toPath());
-        String bindingStorage = getConfig().getString("bindingStorage", "sqlite");
+        String bindingStorage = cfgString("account-binder.bindingStorage", "bindingStorage", "sqlite");
         if ("mysql".equalsIgnoreCase(bindingStorage)) {
-            String url = getConfig().getString("mysql.url", "");
-            String user = getConfig().getString("mysql.user", "");
-            String pass = getConfig().getString("mysql.password", "");
+            String url = cfgString("account-binder.mysql.url", "mysql.url", "");
+            String user = cfgString("account-binder.mysql.user", "mysql.user", "");
+            String pass = cfgString("account-binder.mysql.password", "mysql.password", "");
             if (!url.isEmpty()) {
                 storage.configureMySQL(url, user, pass);
                 getLogger().info("Account binding storage: MySQL");
@@ -237,27 +286,27 @@ public final class HeosFoliaPlugin extends JavaPlugin {
 
         // OneBot QQ bot：以 qq_bot.private-bot.enable 为准，兼容旧键 bot.enabled。
         if (privateBotEnabled()) {
-            String botHost = getConfig().getString("bot.host", "0.0.0.0");
-            int botPort = getConfig().getInt("bot.port", 10100);
-            String botToken = getConfig().getString("bot.access_token", "");
-            long[] groups = getConfig().getLongList("bot.qq_groups").stream().mapToLong(Long::longValue).toArray();
-            int maxPerQq = getConfig().getInt("bot.max_per_qq", 3);
-            String idChars = getConfig().getString("bot.allowed_id_chars", "a-zA-Z0-9_-");
-            int maxIdLen = getConfig().getInt("bot.max_id_length", 16);
+            String botHost = cfgString("qq_bot.private-bot.host", "bot.host", "0.0.0.0");
+            int botPort = cfgInt("qq_bot.private-bot.port", "bot.port", 35013);
+            String botToken = cfgString("qq_bot.private-bot.access_token", "bot.access_token", "");
+            long[] groups = cfgLongList("qq_bot.private-bot.qq_groups", "bot.qq_groups");
+            int maxPerQq = cfgInt("qq_bot.private-bot.max_per_qq", "bot.max_per_qq", 3);
+            String idChars = cfgString("account.allowed_id_chars", "bot.allowed_id_chars", "a-zA-Z0-9_-");
+            int maxIdLen = cfgInt("account.max_id_length", "bot.max_id_length", 16);
 
             String statusTrigger = statusTriggerFor("private-bot");
-            int rateMax = getConfig().getInt("bot.rate_limit_max", 3);
-            int rateWindow = getConfig().getInt("bot.rate_limit_window", 60);
-            int delayMin = getConfig().getInt("bot.reply_delay_min_ms", 1000);
-            int delayMax = getConfig().getInt("bot.reply_delay_max_ms", 2000);
+            int rateMax = cfgInt("qq_bot.private-bot.rate-limit-max", "bot.rate_limit_max", 3);
+            int rateWindow = cfgInt("qq_bot.private-bot.rate-limit-window", "bot.rate_limit_window", 60);
+            int delayMin = cfgInt("qq_bot.private-bot.reply-delay-min-ms", "bot.reply_delay_min_ms", 1000);
+            int delayMax = cfgInt("qq_bot.private-bot.reply-delay-max-ms", "bot.reply_delay_max_ms", 2000);
 
-            String mcHost = getConfig().getString("bot.mc_host", "127.0.0.1");
-            int mcPort = getConfig().getInt("bot.mc_port", 25565);
-            String mcName = getConfig().getString("bot.mc_display_name", "LuoOS服务器");
-            String mcDesc = getConfig().getString("bot.mc_description", "欢迎来到LuoOS");
-            String mcDisplayIp = getConfig().getString("bot.mc_display_ip", mcHost + ":" + mcPort);
+            String mcHost = cfgString("status-card.server-host", "bot.mc_host", "127.0.0.1");
+            int mcPort = cfgInt("status-card.server-port", "bot.mc_port", 25565);
+            String mcName = cfgString("status-card.server-display-name", "bot.mc_display_name", "LuoOS服务器");
+            String mcDesc = cfgString("status-card.server-description", "bot.mc_description", "欢迎来到LuoOS");
+            String mcDisplayIp = cfgString("status-card.server-display-ip", "bot.mc_display_ip", mcHost + ":" + mcPort);
             BotStatusService statusService = new BotStatusService(getLogger(), mcHost, mcPort, mcName, mcDesc,
-                    mcDisplayIp, getDataFolder(), getConfig().getInt("bot.motd_bg_mask_alpha", 140));
+                    mcDisplayIp, getDataFolder(), cfgInt("status-card.motd_bg_mask_alpha", "bot.motd_bg_mask_alpha", 140));
             this.statusService = statusService;
 
             BotDb botDb = new BotDb(getLogger(), whitelistRepository);
@@ -269,16 +318,17 @@ public final class HeosFoliaPlugin extends JavaPlugin {
                         delayMin, delayMax);
 
                 botServer = new OneBotServer(getLogger(), botHost, botPort, botToken);
-                boolean botDebug = getConfig().getBoolean("bot.debug_log", false);
+                boolean botDebug = cfgBool("qq_bot.private-bot.debug_log", "bot.debug_log", false);
                 botServer.setDebugLog(botDebug);
                 botHandler.setDebugLog(botDebug);
                 botHandler.setMailService(new SmtpCodeService(
-                        getConfig().getString("official_qq.smtp.host", "smtp.qq.com"),
-                        getConfig().getInt("official_qq.smtp.port", 587),
-                        getConfig().getString("official_qq.smtp.username", ""),
-                        getConfig().getString("official_qq.smtp.password", ""),
-                        getConfig().getString("official_qq.smtp.from", getConfig().getString("official_qq.smtp.username", "")),
-                        getConfig().getBoolean("official_qq.smtp.starttls", true)));
+                        cfgString("qq_bot.official-bot.smtp.host", "official_qq.smtp.host", defaultSmtpHost(cfgString("qq_bot.official-bot.smtp.username", "official_qq.smtp.username", ""))),
+                        cfgInt("qq_bot.official-bot.smtp.port", "official_qq.smtp.port", 465),
+                        cfgString("qq_bot.official-bot.smtp.username", "official_qq.smtp.username", ""),
+                        cfgString("qq_bot.official-bot.smtp.password", "official_qq.smtp.password", ""),
+                        cfgString("qq_bot.official-bot.smtp.from", "official_qq.smtp.from",
+                                cfgString("qq_bot.official-bot.smtp.username", "official_qq.smtp.username", "")),
+                        cfgBool("qq_bot.official-bot.smtp.starttls", "official_qq.smtp.starttls", false)));
                 botServer.setEventHandler(event -> botHandler.handle(event));
                 new Thread(botServer::startServer, "LuoOS-Bot").start();
                 getLogger().info("OneBot server started on ws://" + botHost + ":" + botPort);
@@ -290,37 +340,40 @@ public final class HeosFoliaPlugin extends JavaPlugin {
 
         if (officialBotEnabled()) {
             try {
-                String smtpUser = getConfig().getString("official_qq.smtp.username", "");
+                String smtpUser = cfgString("qq_bot.official-bot.smtp.username", "official_qq.smtp.username", "");
                 SmtpCodeService smtp = new SmtpCodeService(
-                        getConfig().getString("official_qq.smtp.host", "smtp.qq.com"),
-                        getConfig().getInt("official_qq.smtp.port", 587), smtpUser,
-                        getConfig().getString("official_qq.smtp.password", ""),
-                        getConfig().getString("official_qq.smtp.from", smtpUser),
-                        getConfig().getBoolean("official_qq.smtp.starttls", true));
+                        cfgString("qq_bot.official-bot.smtp.host", "official_qq.smtp.host", defaultSmtpHost(smtpUser)),
+                        cfgInt("qq_bot.official-bot.smtp.port", "official_qq.smtp.port", 465), smtpUser,
+                        cfgString("qq_bot.official-bot.smtp.password", "official_qq.smtp.password", ""),
+                        cfgString("qq_bot.official-bot.smtp.from", "official_qq.smtp.from", smtpUser),
+                        cfgBool("qq_bot.official-bot.smtp.starttls", "official_qq.smtp.starttls", false));
                 if (statusService == null) {
-                    String mcHost = getConfig().getString("bot.mc_host", "127.0.0.1");
-                    int mcPort = getConfig().getInt("bot.mc_port", 25565);
+                    String mcHost = cfgString("status-card.server-host", "bot.mc_host", "127.0.0.1");
+                    int mcPort = cfgInt("status-card.server-port", "bot.mc_port", 25565);
                     statusService = new BotStatusService(getLogger(), mcHost, mcPort,
-                            getConfig().getString("bot.mc_display_name", "LuoOS服务器"),
-                            getConfig().getString("bot.mc_description", "欢迎来到LuoOS"),
-                            getConfig().getString("bot.mc_display_ip", mcHost + ":" + mcPort),
-                            getDataFolder(), getConfig().getInt("bot.motd_bg_mask_alpha", 140));
+                            cfgString("status-card.server-display-name", "bot.mc_display_name", "LuoOS服务器"),
+                            cfgString("status-card.server-description", "bot.mc_description", "欢迎来到LuoOS"),
+                            cfgString("status-card.server-display-ip", "bot.mc_display_ip", mcHost + ":" + mcPort),
+                            getDataFolder(), cfgInt("status-card.motd_bg_mask_alpha", "bot.motd_bg_mask_alpha", 140));
                 }
                 BotDb botDb = new BotDb(getLogger(), whitelistRepository);
                 BotCommandHandler handler = new BotCommandHandler(getLogger(), botDb, storage, whitelistRepository,
-                        statusService, getConfig().getInt("bot.max_per_qq", 3), getConfig().getString("bot.allowed_id_chars", "a-zA-Z0-9_-"),
-                        getConfig().getInt("bot.max_id_length", 16), new long[0],
+                        statusService, cfgInt("qq_bot.private-bot.max_per_qq", "bot.max_per_qq", 3),
+                        cfgString("account.allowed_id_chars", "bot.allowed_id_chars", "a-zA-Z0-9_-"),
+                        cfgInt("account.max_id_length", "bot.max_id_length", 16), new long[0],
                         // 官Q与传统机器人共用同一份状态卡片触发词。
-                        statusTriggerFor("official-bot"), getConfig().getInt("bot.rate_limit_max", 3),
-                        getConfig().getInt("bot.rate_limit_window", 60), getConfig().getInt("bot.reply_delay_min_ms", 1000),
-                        getConfig().getInt("bot.reply_delay_max_ms", 2000));
-                handler.setDebugLog(getConfig().getBoolean("official_qq.debug_log", false));
+                        // 官Q不做人为延迟。
+                        statusTriggerFor("official-bot"), cfgInt("qq_bot.private-bot.rate-limit-max", "bot.rate_limit_max", 3),
+                        cfgInt("qq_bot.private-bot.rate-limit-window", "bot.rate_limit_window", 60), 0, 0);
+                handler.setDebugLog(cfgBool("qq_bot.official-bot.debug_log", "official_qq.debug_log", false));
                 handler.setMailService(smtp);
-                officialQQBot = new OfficialQQBot(getLogger(), getConfig().getString("official_qq.app_id", ""),
-                        getConfig().getString("official_qq.app_secret", ""), getConfig().getString("official_qq.api_base", "https://api.bot.qq.com"),
-                        getConfig().getString("official_qq.token_base", "https://api.bot.qq.com"),
-                        getConfig().getString("official_qq.gateway", ""), whitelistRepository, smtp,
-                        getConfig().getInt("official_qq.code_digits", 6), getConfig().getInt("official_qq.code_expire_minutes", 10),
+                officialQQBot = new OfficialQQBot(getLogger(), cfgString("qq_bot.official-bot.app_id", "official_qq.app_id", ""),
+                        cfgString("qq_bot.official-bot.app_secret", "official_qq.app_secret", ""),
+                        cfgString("qq_bot.official-bot.api_base", "official_qq.api_base", "https://api.bot.qq.com"),
+                        cfgString("qq_bot.official-bot.token_base", "official_qq.token_base", "https://api.bot.qq.com"),
+                        cfgString("qq_bot.official-bot.gateway", "official_qq.gateway", ""), whitelistRepository, smtp,
+                        cfgInt("qq_bot.official-bot.code_digits", "official_qq.code_digits", 6),
+                        cfgInt("qq_bot.official-bot.code_expire_minutes", "official_qq.code_expire_minutes", 10),
                         // 官Q不限制群聊：groups 留空即允许所有群，避免平台OpenID变动导致失效。
                         java.util.Set.of(), handler::handle);
                 new Thread(officialQQBot::start, "LuoOS-Official-QQ").start();
@@ -331,7 +384,7 @@ public final class HeosFoliaPlugin extends JavaPlugin {
         // LuoOS provides its own complete auth system (login/register/password management).
         // Having both AuthMe and LuoOS enabled causes duplicate login/register prompts
         // and inconsistent authentication state.
-        if (getConfig().getBoolean("enableAuthentication", true)) {
+        if (cfgBool("account.enableAuthentication", "enableAuthentication", true)) {
             org.bukkit.plugin.Plugin authMe = getServer().getPluginManager().getPlugin("AuthMe");
             if (authMe != null && authMe.isEnabled()) {
                 getLogger().warning("========================================");
@@ -371,11 +424,11 @@ public final class HeosFoliaPlugin extends JavaPlugin {
         }
 
         getLogger().info("Heos Folia enabled (UUID-based + Account Binding + Group Concurrency)");
-        getLogger().info("Account binding: " + getConfig().getBoolean("enableAccountBinding", true));
+        getLogger().info("Account binding: " + cfgBool("account-binder.enable", "enableAccountBinding", true));
         getLogger().info("Binding storage: " + bindingStorage);
-        getLogger().info("Auth: " + getConfig().getBoolean("enableAuthentication", true)
-                + ", TPS: " + getConfig().getBoolean("enableAutoLogTps", true));
-        getLogger().info("Offline: " + (getConfig().getBoolean("allowOfflinePlayers", true) ? "Enabled" : "Disabled"));
+        getLogger().info("Auth: " + cfgBool("account.enableAuthentication", "enableAuthentication", true)
+                + ", TPS: " + cfgBool("enableAutoLogTps", null, true));
+        getLogger().info("Offline: " + (cfgBool("account.allowOfflinePlayers", "allowOfflinePlayers", true) ? "Enabled" : "Disabled"));
     }
 
     @Override
@@ -449,7 +502,7 @@ public final class HeosFoliaPlugin extends JavaPlugin {
     }
 
     private boolean isRecipeViewerSyncEnabled() {
-        return getConfig().getBoolean("enableRecipeViewerSync", true)
+        return cfgBool("enableRecipeViewerSync", null, true)
                 && compareVersions(getServer().getBukkitVersion().split("-", 2)[0], "1.21.2") >= 0;
     }
 

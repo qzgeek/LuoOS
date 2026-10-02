@@ -84,10 +84,18 @@ public final class OfficialBindingRepository {
         }
     }
 
+    /** 绑定申请的失败原因；用于给用户可读提示，而不是笼统的“失败”。 */
+    public enum RequestResult { OK, ALREADY_BOUND, RATE_LIMITED, MAIL_FAILED, STORAGE_FAILED, INVALID }
+
     /** Reserves only a rate-limit ticket, sends mail, then stores a challenge. Never writes identity. */
     public boolean requestCode(String openid, long qq, String codeHash, long expiresAt, long now, MailDelivery delivery) {
+        return requestCodeDetailed(openid, qq, codeHash, expiresAt, now, delivery) == RequestResult.OK;
+    }
+
+    /** 与 requestCode 相同，但返回具体失败原因。 */
+    public RequestResult requestCodeDetailed(String openid, long qq, String codeHash, long expiresAt, long now, MailDelivery delivery) {
         if (openid == null || openid.isBlank() || openid.length() > 128 || qq <= 0
-                || codeHash == null || codeHash.isBlank() || expiresAt <= now) return false;
+                || codeHash == null || codeHash.isBlank() || expiresAt <= now) return RequestResult.INVALID;
         String ticket = UUID.randomUUID().toString();
         boolean reserved = run("reserve", c -> {
             if (exists(c, "SELECT 1 FROM qq_official_bindings WHERE openid = ? OR qq = ?", openid, qq)) return false;
@@ -96,11 +104,19 @@ public final class OfficialBindingRepository {
             execute(c, "DELETE FROM qq_official_pending WHERE openid = ?", openid);
             return true;
         });
-        if (!reserved) return false;
+        if (!reserved) {
+            // 区分“已绑定”和“冷却中/数据库异常”，避免用户无法判断该等还是该换号。
+            boolean bound = run("probe bound", c -> exists(c, "SELECT 1 FROM qq_official_bindings WHERE openid = ? OR qq = ?", openid, qq));
+            return bound ? RequestResult.ALREADY_BOUND : RequestResult.RATE_LIMITED;
+        }
         // No storage lock or SQL transaction is held during network I/O. Failed mail leaves no new challenge.
         try { delivery.send(); }
-        catch (Exception e) { failure("mail delivery"); return false; }
-        return run("save challenge", c -> {
+        catch (Exception e) {
+            // 保留真实原因，否则发信失败只能看到一句笼统警告，无法排查。
+            failure("mail delivery", e);
+            return RequestResult.MAIL_FAILED;
+        }
+        boolean stored = run("save challenge", c -> {
             // A slow, older mail request cannot overwrite a more recent request or a confirmed identity.
             execute(c, "UPDATE qq_official_request_limits SET next_at = next_at WHERE request_key = ?", "openid:" + openid);
             if (!exists(c, "SELECT 1 FROM qq_official_request_limits WHERE request_key = ? AND token = ?", "openid:" + openid, ticket)
@@ -109,6 +125,7 @@ public final class OfficialBindingRepository {
             execute(c, "INSERT INTO qq_official_pending (openid,qq,code_hash,expires_at,attempts,created_at) VALUES (?,?,?,?,0,?)", openid, qq, codeHash, expiresAt, now);
             return true;
         });
+        return stored ? RequestResult.OK : RequestResult.STORAGE_FAILED;
     }
 
     private void reserve(Connection c, String key, long now, String ticket) throws SQLException {
@@ -176,4 +193,12 @@ public final class OfficialBindingRepository {
         try (var ps = statement(c, sql, args); var rs = ps.executeQuery()) { return rs.next(); }
     }
     private void failure(String operation) { logger.warning("[OfficialBindingRepository] " + operation + " rejected or failed; no identity granted"); }
+
+    /** 带原因的失败日志；只输出异常类型与消息，不含凭据。 */
+    private void failure(String operation, Throwable cause) {
+        Throwable root = cause;
+        while (root.getCause() != null && root.getCause() != root) root = root.getCause();
+        logger.warning("[OfficialBindingRepository] " + operation + " rejected or failed; no identity granted — "
+                + root.getClass().getSimpleName() + ": " + root.getMessage());
+    }
 }

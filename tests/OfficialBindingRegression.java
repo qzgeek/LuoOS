@@ -30,6 +30,10 @@ public final class OfficialBindingRegression {
     static boolean request(OfficialBindingRepository r, String id, long qq, String hash, long now) {
         return r.requestCode(id, qq, hash, now + 600_000, now, () -> {});
     }
+    static OfficialBindingRepository.RequestResult requestResult(OfficialBindingRepository r, String id, long qq, String hash, long now,
+                                                                OfficialBindingRepository.MailDelivery delivery) {
+        return r.requestCodeDetailed(id, qq, hash, now + 600_000, now, delivery);
+    }
     public static void main(String[] args) throws Exception {
         Class.forName("org.sqlite.JDBC");
         Path dir = Files.createTempDirectory("luoos-binding-regression-");
@@ -63,6 +67,16 @@ public final class OfficialBindingRegression {
             check(!r.requestCode("mailfail",10005,"mailhash",now+600_000,now,()->{throw new Exception("simulated SMTP failure");}),"mail failure");
             check(r.officialQq("mailfail").isEmpty() && !r.confirmCode("mailfail","mailhash",now),"mail failed no code");
             pass("SMTP failure produces neither pending challenge nor identity");
+            // 失败原因必须可区分：邮件失败 / 冷却 / 已绑定，不能都报同一句
+            var mailFail = requestResult(r, "reason-mail", 30001, "h", now,
+                    () -> { throw new Exception("simulated SMTP failure"); });
+            check(mailFail == OfficialBindingRepository.RequestResult.MAIL_FAILED, "reason=mail failed, got " + mailFail);
+            check(requestResult(r, "reason-ok", 30002, "h2", now, () -> {}) == OfficialBindingRepository.RequestResult.OK, "reason ok");
+            var rate = requestResult(r, "reason-ok", 30002, "h3", now + 1, () -> {});
+            check(rate == OfficialBindingRepository.RequestResult.RATE_LIMITED, "reason=rate limited, got " + rate);
+            var invalid = requestResult(r, "reason-invalid", 0, "h4", now, () -> {});
+            check(invalid == OfficialBindingRepository.RequestResult.INVALID, "reason=invalid, got " + invalid);
+            pass("绑定申请按真实原因返回（邮件失败/冷却/参数无效各不同）");
             AtomicInteger deliveries = new AtomicInteger();
             check(r.requestCode("limited",10006,"one",now+600_000,now,deliveries::incrementAndGet),"limit setup");
             check(!r.requestCode("limited",10006,"two",now+600_000,now+1,deliveries::incrementAndGet),"openid cooldown");

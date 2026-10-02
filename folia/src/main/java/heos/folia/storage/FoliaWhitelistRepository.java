@@ -280,6 +280,13 @@ public final class FoliaWhitelistRepository {
         return officialBindings.requestCode(openid, qq, codeHash, expiresAt, System.currentTimeMillis(), delivery);
     }
 
+    /** 绑定申请，返回具体原因以便给出可读提示。 */
+    public OfficialBindingRepository.RequestResult requestOfficialCodeDetailed(String openid, long qq, String codeHash,
+                                                                             long expiresAt,
+                                                                             OfficialBindingRepository.MailDelivery delivery) {
+        return officialBindings.requestCodeDetailed(openid, qq, codeHash, expiresAt, System.currentTimeMillis(), delivery);
+    }
+
     public boolean confirmOfficialCode(String openid, String codeHash, long now) {
         return officialBindings.confirmCode(openid, codeHash, now);
     }

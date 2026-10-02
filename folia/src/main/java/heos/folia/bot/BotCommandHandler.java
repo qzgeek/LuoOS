@@ -129,7 +129,12 @@ public class BotCommandHandler {
         return false;
     }
 
-    private void delayReply() {
+    /**
+     * 拟人化回复延迟，仅用于传统 OneBot 通道。
+     * 官方 QQ 通道不做人为延迟：平台本身有被动回复窗口，额外 sleep 只会让用户觉得慢。
+     */
+    private void delayReply(OneBotEvent event) {
+        if (event != null && event.isOfficial()) return;
         if (delayMaxMs <= 0) return;
         int delay = delayMinMs + random.nextInt(Math.max(1, delayMaxMs - delayMinMs + 1));
         try { Thread.sleep(delay); } catch (InterruptedException ignored) {}
@@ -168,7 +173,7 @@ public class BotCommandHandler {
                 || RESET_PASSWORD.matcher(text).matches()
                 || QUERY_SIMPLE.matcher(text).matches() || QUERY_ARGS.matcher(text).matches();
         if (isCommand || isAdmin) {
-            delayReply();
+            delayReply(event);
         }
 
         // --- Status (rate-limited for non-admin) ---
@@ -701,7 +706,7 @@ public class BotCommandHandler {
                 sb.append("\n");
             }
             if (count == 0) sb.append("(无)");
-            delayReply();
+            delayReply(event);
             event.reply(sb.toString());
             event.react(true);
         } catch (Exception e) {
