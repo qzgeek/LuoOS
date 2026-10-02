@@ -305,14 +305,14 @@ public final class FoliaMessages {
     }
 
     private static String allowedUsernamePattern() {
-        if (plugin != null && plugin.getConfig().getBoolean("allowMoreOfflineUsernameCharacters", true)) {
+        if (plugin != null && FoliaConfig.getBoolean(plugin, "allowMoreOfflineUsernameCharacters", true)) {
             return translate("text.heos.usernamePatternExtended");
         }
         return translate("text.heos.usernamePatternSimple");
     }
 
     private static String currentLanguage() {
-        return plugin == null ? DEFAULT_LANGUAGE : plugin.getConfig().getString("language", DEFAULT_LANGUAGE);
+        return plugin == null ? DEFAULT_LANGUAGE : FoliaConfig.getString(plugin, "language", DEFAULT_LANGUAGE);
     }
 
     private static boolean isChinese() {

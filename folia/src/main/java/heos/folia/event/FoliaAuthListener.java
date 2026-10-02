@@ -35,6 +35,7 @@ import heos.folia.utils.FoliaTimeParser;
 
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
+import heos.folia.utils.FoliaConfig;
 
 public final class FoliaAuthListener implements Listener {
     private final Plugin plugin;
@@ -68,7 +69,7 @@ public final class FoliaAuthListener implements Listener {
         }
 
         // Maintenance mode: only OPs can join
-        if (plugin.getConfig().getBoolean("maintenance", false)) {
+        if (FoliaConfig.getBoolean(plugin, "maintenance", false)) {
             org.bukkit.OfflinePlayer op = org.bukkit.Bukkit.getOfflinePlayer(uuid);
             if (!op.isOp()) {
                 event.disallow(AsyncPlayerPreLoginEvent.Result.KICK_OTHER,
@@ -80,7 +81,7 @@ public final class FoliaAuthListener implements Listener {
         // Whitelist/ban handled at Netty level by FoliaLoginUsernameValidationBypassService
 
         // Ban check — by UUID, also check DB (QQ bot blacklist)
-        if (plugin.getConfig().getBoolean("enableCustomBan", true)) {
+        if (FoliaConfig.getBoolean(plugin, "enableCustomBan", true)) {
             FoliaBanData.BanEntry playerBan = banData.getPlayerBanByUuid(uuid);
             if (playerBan == null) {
                 playerBan = banData.getPlayerBan(username, null);

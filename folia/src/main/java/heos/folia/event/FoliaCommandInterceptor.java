@@ -13,6 +13,7 @@ import org.bukkit.plugin.Plugin;
 
 import java.util.Arrays;
 import java.util.Locale;
+import heos.folia.utils.FoliaConfig;
 
 public final class FoliaCommandInterceptor implements Listener {
     private final Plugin plugin;
@@ -27,7 +28,7 @@ public final class FoliaCommandInterceptor implements Listener {
 
     @EventHandler(priority = EventPriority.LOWEST)
     void onPlayerCommand(PlayerCommandPreprocessEvent event) {
-        if (!plugin.getConfig().getBoolean("enableUnprefixedCommandHijack", true)) {
+        if (!FoliaConfig.getBoolean(plugin, "enableUnprefixedCommandHijack", true)) {
             return;
         }
         ParsedCommand parsed = parse(event.getMessage());
@@ -39,7 +40,7 @@ public final class FoliaCommandInterceptor implements Listener {
 
     @EventHandler(priority = EventPriority.LOWEST)
     void onServerCommand(ServerCommandEvent event) {
-        if (!plugin.getConfig().getBoolean("enableUnprefixedCommandHijack", true)) {
+        if (!FoliaConfig.getBoolean(plugin, "enableUnprefixedCommandHijack", true)) {
             return;
         }
         ParsedCommand parsed = parse(event.getCommand());

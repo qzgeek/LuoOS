@@ -36,11 +36,11 @@ public final class FoliaTpsDisplayService implements Listener {
     }
 
     public void start(Player player) {
-        if (!plugin.getConfig().getBoolean("enableAutoLogTps", true)) {
+        if (!FoliaConfig.getBoolean(plugin, "enableAutoLogTps", true)) {
             return;
         }
         players.put(player.getUniqueId(), player);
-        activePlayers.put(player.getUniqueId(), Math.max(1, plugin.getConfig().getInt("autoLogTpsDelayTicks", 20)));
+        activePlayers.put(player.getUniqueId(), Math.max(1, FoliaConfig.getInt(plugin, "autoLogTpsDelayTicks", 20)));
     }
 
     public void stop(Player player) {
@@ -63,10 +63,10 @@ public final class FoliaTpsDisplayService implements Listener {
     }
 
     private void tick() {
-        if (activePlayers.isEmpty() || !plugin.getConfig().getBoolean("enableAutoLogTps", true)) {
+        if (activePlayers.isEmpty() || !FoliaConfig.getBoolean(plugin, "enableAutoLogTps", true)) {
             return;
         }
-        int delay = Math.max(1, plugin.getConfig().getInt("autoLogTpsDelayTicks", 20));
+        int delay = Math.max(1, FoliaConfig.getInt(plugin, "autoLogTpsDelayTicks", 20));
         for (Map.Entry<UUID, Integer> entry : activePlayers.entrySet()) {
             UUID uuid = entry.getKey();
             Player player = players.get(uuid);

@@ -17,6 +17,7 @@ import heos.folia.utils.FoliaMessages;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
+import heos.folia.utils.FoliaConfig;
 
 public final class FoliaAuthService {
     private final Plugin plugin;
@@ -168,7 +169,7 @@ public final class FoliaAuthService {
     }
 
     private boolean isBypassedPlayer(Player player) {
-        var names = plugin.getConfig().getStringList("loginBypassNames");
+        var names = FoliaConfig.getStringList(plugin, "loginBypassNames");
         String name = player.getName();
         for (String bn : names) {
             if (name.equals(bn.trim()) || name.startsWith(bn.trim())) return true;
@@ -177,11 +178,11 @@ public final class FoliaAuthService {
     }
 
     public boolean isAuthenticationEnabled() {
-        return plugin.getConfig().getBoolean("enableAuthentication", true);
+        return FoliaConfig.getBoolean(plugin, "enableAuthentication", true);
     }
 
     public boolean areOfflinePlayersAllowed() {
-        return plugin.getConfig().getBoolean("allowOfflinePlayers", true);
+        return FoliaConfig.getBoolean(plugin, "allowOfflinePlayers", true);
     }
 
     public boolean canRunCommandWhileLocked(String commandLine) {
@@ -240,8 +241,8 @@ public final class FoliaAuthService {
                     + " — len1=" + p1.length() + " len2=" + p2.length());
             return;
         }
-        int min = plugin.getConfig().getInt("minPasswordLength", 4);
-        int max = plugin.getConfig().getInt("maxPasswordLength", 32);
+        int min = FoliaConfig.getInt(plugin, "minPasswordLength", 4);
+        int max = FoliaConfig.getInt(plugin, "maxPasswordLength", 32);
         if (p1.length() < min) {
             player.sendMessage(ChatColor.RED + FoliaMessages.passwordTooShort().formatted(min));
             return;
@@ -278,8 +279,8 @@ public final class FoliaAuthService {
             player.sendMessage(ChatColor.RED + "New password cannot be the same as the old password");
             return;
         }
-        int min = plugin.getConfig().getInt("minPasswordLength", 4);
-        int max = plugin.getConfig().getInt("maxPasswordLength", 32);
+        int min = FoliaConfig.getInt(plugin, "minPasswordLength", 4);
+        int max = FoliaConfig.getInt(plugin, "maxPasswordLength", 32);
         if (newPassword.length() < min) {
             player.sendMessage(ChatColor.RED + FoliaMessages.passwordTooShort().formatted(min));
             return;
@@ -319,7 +320,7 @@ public final class FoliaAuthService {
     }
 
     private void scheduleLoginTimeout(Player player) {
-        int timeoutSeconds = Math.max(1, plugin.getConfig().getInt("loginTimeout", 60));
+        int timeoutSeconds = Math.max(1, FoliaConfig.getInt(plugin, "loginTimeout", 60));
         player.getScheduler().runDelayed(plugin, task -> {
             if (player.isOnline() && shouldBlock(player)) {
                 FoliaDisconnects.disconnect(player, FoliaMessages.loginTimeout(), "HEOS_LOGIN_TIMEOUT");
@@ -328,7 +329,7 @@ public final class FoliaAuthService {
     }
 
     private void scheduleLoginReminder(Player player) {
-        int reminderSeconds = Math.max(1, plugin.getConfig().getInt("loginReminderSeconds", 10));
+        int reminderSeconds = Math.max(1, FoliaConfig.getInt(plugin, "loginReminderSeconds", 10));
         player.getScheduler().runDelayed(plugin, task -> {
             if (!player.isOnline() || !shouldBlock(player)) {
                 return;
@@ -368,12 +369,12 @@ public final class FoliaAuthService {
         if (session.authenticated) {
             return true;
         }
-        int limit = plugin.getConfig().getInt("maxConcurrentSessionsPerIp", -1);
+        int limit = FoliaConfig.getInt(plugin, "maxConcurrentSessionsPerIp", -1);
         String ip = FoliaPlayerAccess.ip(player);
         if (limit >= 0 && authenticatedSessionsByIp.getOrDefault(ip, 0) >= limit) {
             FoliaDisconnects.disconnect(
                     player,
-                    plugin.getConfig().getString("sessionLimitKickMessage", "The online session limit for this IP has been reached"),
+                    FoliaConfig.getString(plugin, "sessionLimitKickMessage", "The online session limit for this IP has been reached"),
                     "HEOS_SESSION_LIMIT"
             );
             return false;
@@ -404,12 +405,12 @@ public final class FoliaAuthService {
         // Lophine bots: check via reflection (Bot interface)
         if (isLophineBot(player)) return true;
         // Check IP whitelist (localhost always bypassed for bot compat)
-        var ips = plugin.getConfig().getStringList("loginBypassIps");
+        var ips = FoliaConfig.getStringList(plugin, "loginBypassIps");
         for (String bip : ips) {
             if (ip.equals(bip.trim())) return true;
         }
         // Check name whitelist (prefix match for BOT_ etc.)
-        var names = plugin.getConfig().getStringList("loginBypassNames");
+        var names = FoliaConfig.getStringList(plugin, "loginBypassNames");
         String name = player.getName();
         for (String bn : names) {
             if (name.equals(bn.trim()) || name.startsWith(bn.trim())) return true;

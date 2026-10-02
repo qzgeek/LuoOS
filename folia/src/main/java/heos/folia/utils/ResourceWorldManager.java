@@ -108,8 +108,8 @@ public class ResourceWorldManager implements AutoCloseable {
         long seed = random.nextLong();
         final String seedStr = String.valueOf(Math.abs(seed));
 
-        boolean nether = plugin.getConfig().getBoolean("resourceWorld.nether", true);
-        boolean end = plugin.getConfig().getBoolean("resourceWorld.end", true);
+        boolean nether = FoliaConfig.getBoolean(plugin, "resourceWorld.nether", true);
+        boolean end = FoliaConfig.getBoolean(plugin, "resourceWorld.end", true);
 
         // Delete old worlds first (async)
         deleteOldAsync().thenRun(() -> {
@@ -161,8 +161,8 @@ public class ResourceWorldManager implements AutoCloseable {
         long seed = random.nextLong();
         String seedStr = String.valueOf(Math.abs(seed));
 
-        boolean nether = plugin.getConfig().getBoolean("resourceWorld.nether", true);
-        boolean end = plugin.getConfig().getBoolean("resourceWorld.end", true);
+        boolean nether = FoliaConfig.getBoolean(plugin, "resourceWorld.nether", true);
+        boolean end = FoliaConfig.getBoolean(plugin, "resourceWorld.end", true);
 
         deleteOldResourceWorlds();
 
@@ -345,8 +345,8 @@ public class ResourceWorldManager implements AutoCloseable {
      *   resourceWorld.refreshHour       — hour of day (default 8, local timezone)
      */
     private long computeNextRefresh() {
-        int dayOfMonth = plugin.getConfig().getInt("resourceWorld.refreshDayOfMonth", 25);
-        int hour = plugin.getConfig().getInt("resourceWorld.refreshHour", 8);
+        int dayOfMonth = FoliaConfig.getInt(plugin, "resourceWorld.refreshDayOfMonth", 25);
+        int hour = FoliaConfig.getInt(plugin, "resourceWorld.refreshHour", 8);
         java.util.Calendar cal = java.util.Calendar.getInstance();
         cal.set(java.util.Calendar.HOUR_OF_DAY, hour);
         cal.set(java.util.Calendar.MINUTE, 0);
@@ -460,8 +460,8 @@ public class ResourceWorldManager implements AutoCloseable {
                     plugin.getConfig().set(CFG_SEED, seedStr);
                     plugin.saveConfig();
 
-                    boolean nether = plugin.getConfig().getBoolean("resourceWorld.nether", true);
-                    boolean end = plugin.getConfig().getBoolean("resourceWorld.end", true);
+                    boolean nether = FoliaConfig.getBoolean(plugin, "resourceWorld.nether", true);
+                    boolean end = FoliaConfig.getBoolean(plugin, "resourceWorld.end", true);
                     logger.info("[ResourceWorld] Refreshing (seed: " + seedStr + ")");
 
                     createOneWorld(MAIN_KEY, owDim, seed)

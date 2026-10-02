@@ -144,7 +144,7 @@ public final class FoliaLoginUsernameValidationBypassService implements AutoClos
         if (rejectHeosLogin(ch, username)) return true;
 
         // 2) For non-standard usernames (Chinese etc.), or bound accounts — offline bypass
-        boolean allowOffline = plugin.getConfig().getBoolean("allowOfflinePlayers", true);
+        boolean allowOffline = FoliaConfig.getBoolean(plugin, "allowOfflinePlayers", true);
         boolean isStandard = FoliaMojangApi.isValidMojangUsername(username);
         UUID effectiveUuid = resolveBindingUuid(username);
 
@@ -169,7 +169,7 @@ public final class FoliaLoginUsernameValidationBypassService implements AutoClos
 
     private UUID resolveBindingUuid(String username) {
         UUID rawUuid = offlineUuid(username);
-        if (plugin.getConfig().getBoolean("enableAccountBinding", true)) {
+        if (FoliaConfig.getBoolean(plugin, "enableAccountBinding", true)) {
             UUID target = accountBinding.resolveEffectiveUuid(rawUuid);
             if (!target.equals(rawUuid)) {
                 String onlineName = accountBinding.checkGroupOnline(rawUuid);
@@ -196,7 +196,7 @@ public final class FoliaLoginUsernameValidationBypassService implements AutoClos
         // even though the whitelist UI shows them as 冻结.
         if (isInDbWhitelist(username)) return false;
         // Fallback: JSON whitelist (legacy)
-        if (plugin.getConfig().getBoolean("enableWhitelist", false) && whitelistData.isWhitelisted(username))
+        if (FoliaConfig.getBoolean(plugin, "enableWhitelist", false) && whitelistData.isWhitelisted(username))
             return false;
         // DB has entries = whitelist is active, deny those not in it
         if (dbWhitelistHasEntries()) {
@@ -225,7 +225,7 @@ public final class FoliaLoginUsernameValidationBypassService implements AutoClos
     private boolean rejectBan(String username, Channel ch) {
         FoliaBanData.BanEntry ban = banData.getPlayerBan(username, null);
         if (ban != null) {
-            if (!plugin.getConfig().getBoolean("enableCustomBan", true)
+            if (!FoliaConfig.getBoolean(plugin, "enableCustomBan", true)
                     && !FoliaMessages.isMigrationReason(ban.reason)) return false;
             disconnectLogin(ch, FoliaMessages.banMessage(ban.reason, FoliaTimeParser.formatAbsolute(ban.expiryTime)));
             return true;
@@ -236,7 +236,7 @@ public final class FoliaLoginUsernameValidationBypassService implements AutoClos
             disconnectLogin(ch, "你已被封禁" + (dbBanReason.isEmpty() ? "" : "：" + dbBanReason));
             return true;
         }
-        if (!plugin.getConfig().getBoolean("enableCustomBan", true)) return false;
+        if (!FoliaConfig.getBoolean(plugin, "enableCustomBan", true)) return false;
         FoliaBanData.IpBanEntry ip = banData.getIpBan(channelIp(ch));
         if (ip == null) return false;
         disconnectLogin(ch, FoliaMessages.banIpMessage(ip.reason, FoliaTimeParser.formatAbsolute(ip.expiryTime)));

@@ -29,20 +29,20 @@ public final class FoliaLoginFailureTracker {
     public boolean recordFailure(String username, String ip) {
         boolean usernameBlocked = false;
         boolean ipBlocked = false;
-        if (plugin.getConfig().getBoolean("enableUsernameLoginFailureLock", true)) {
+        if (FoliaConfig.getBoolean(plugin, "enableUsernameLoginFailureLock", true)) {
             usernameBlocked = recordFailure(
                     usernameFailures,
                     normalize(username),
-                    Math.max(1, plugin.getConfig().getInt("usernameLoginFailureLimit", 5)),
-                    Math.max(1, plugin.getConfig().getInt("usernameLoginFailureLockSeconds", 30))
+                    Math.max(1, FoliaConfig.getInt(plugin, "usernameLoginFailureLimit", 5)),
+                    Math.max(1, FoliaConfig.getInt(plugin, "usernameLoginFailureLockSeconds", 30))
             );
         }
-        if (plugin.getConfig().getBoolean("enableIpLoginFailureLock", false) && ip != null && !ip.isEmpty()) {
+        if (FoliaConfig.getBoolean(plugin, "enableIpLoginFailureLock", false) && ip != null && !ip.isEmpty()) {
             ipBlocked = recordFailure(
                     ipFailures,
                     normalize(ip),
-                    Math.max(1, plugin.getConfig().getInt("ipLoginFailureLimit", 10)),
-                    Math.max(1, plugin.getConfig().getInt("ipLoginFailureLockSeconds", 30))
+                    Math.max(1, FoliaConfig.getInt(plugin, "ipLoginFailureLimit", 10)),
+                    Math.max(1, FoliaConfig.getInt(plugin, "ipLoginFailureLockSeconds", 30))
             );
         }
         return usernameBlocked || ipBlocked;
@@ -56,11 +56,11 @@ public final class FoliaLoginFailureTracker {
     }
 
     private boolean isUsernameBlocked(String username) {
-        return plugin.getConfig().getBoolean("enableUsernameLoginFailureLock", true) && isBlocked(usernameFailures.get(normalize(username)));
+        return FoliaConfig.getBoolean(plugin, "enableUsernameLoginFailureLock", true) && isBlocked(usernameFailures.get(normalize(username)));
     }
 
     private boolean isIpBlocked(String ip) {
-        return plugin.getConfig().getBoolean("enableIpLoginFailureLock", false) && ip != null && !ip.isEmpty() && isBlocked(ipFailures.get(normalize(ip)));
+        return FoliaConfig.getBoolean(plugin, "enableIpLoginFailureLock", false) && ip != null && !ip.isEmpty() && isBlocked(ipFailures.get(normalize(ip)));
     }
 
     private static boolean recordFailure(Map<String, FailureState> failures, String key, int limit, int lockSeconds) {

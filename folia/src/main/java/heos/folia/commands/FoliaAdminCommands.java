@@ -23,6 +23,7 @@ import java.util.Date;
 import java.util.List;
 import java.io.File;
 import java.util.UUID;
+import heos.folia.utils.FoliaConfig;
 
 public final class FoliaAdminCommands implements CommandExecutor, TabCompleter {
     private final FoliaStorage storage;
@@ -478,7 +479,7 @@ public final class FoliaAdminCommands implements CommandExecutor, TabCompleter {
             sender.sendMessage(ChatColor.RED + "用法: /los maintenance <on|off|status>");
             return true;
         }
-        boolean current = plugin.getConfig().getBoolean("maintenance", false);
+        boolean current = FoliaConfig.getBoolean(plugin, "maintenance", false);
         switch (args[1].toLowerCase()) {
             case "on" -> {
                 plugin.getConfig().set("maintenance", true);

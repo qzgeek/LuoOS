@@ -25,6 +25,7 @@ import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
+import heos.folia.utils.FoliaConfig;
 
 public final class FoliaMigrationCommands {
     private static final long CONFIRM_TIMEOUT_MILLIS = 60_000L;
@@ -60,7 +61,7 @@ public final class FoliaMigrationCommands {
     }
 
     private boolean prepare(CommandSender sender, String[] args) {
-        if (!plugin.getConfig().getBoolean("enablePlayerDataMigration", false)) {
+        if (!FoliaConfig.getBoolean(plugin, "enablePlayerDataMigration", false)) {
             sender.sendMessage(ChatColor.RED + "Player data migration is disabled in config.yml");
             return true;
         }
@@ -88,7 +89,7 @@ public final class FoliaMigrationCommands {
     }
 
     private boolean confirm(CommandSender sender, String[] args) {
-        if (!plugin.getConfig().getBoolean("enablePlayerDataMigration", false)) {
+        if (!FoliaConfig.getBoolean(plugin, "enablePlayerDataMigration", false)) {
             sender.sendMessage(ChatColor.RED + "Player data migration is disabled in config.yml");
             return true;
         }
@@ -175,7 +176,7 @@ public final class FoliaMigrationCommands {
         }
 
         int deleted = clearSourceData(worldDir, migration.sourceUsername, sourceUuids);
-        int banSeconds = Math.min(MAX_MIGRATION_BAN_SECONDS, Math.max(1, plugin.getConfig().getInt("migrationBanSeconds", 30)));
+        int banSeconds = Math.min(MAX_MIGRATION_BAN_SECONDS, Math.max(1, FoliaConfig.getInt(plugin, "migrationBanSeconds", 30)));
         long banExpiry = System.currentTimeMillis() + banSeconds * 1000L;
         UUID sourceUuid = sourceUuids.isEmpty() ? null : sourceUuids.iterator().next();
         banData.addPlayerBan(migration.sourceUsername, sourceUuid, "Data migration in progress", banExpiry, sender.getName());
