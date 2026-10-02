@@ -51,6 +51,24 @@ public final class HeosFoliaPlugin extends JavaPlugin {
     PlayerStatsTracker statsTracker;
 
     /**
+     * 私人（OneBot）机器人是否启用。
+     * 需要总开关 qq_bot.enable 与通道开关 qq_bot.private-bot.enable 同时为真；
+     * 兼容旧配置中直接用 bot.enabled 控制 OneBot 的写法。
+     */
+    private boolean privateBotEnabled() {
+        if (!getConfig().getBoolean("qq_bot.enable", true)) return false;
+        if (getConfig().contains("qq_bot.private-bot.enable"))
+            return getConfig().getBoolean("qq_bot.private-bot.enable", false);
+        return getConfig().getBoolean("bot.enabled", false);
+    }
+
+    /** 官方QQ机器人是否启用（总开关 + 通道开关）。 */
+    private boolean officialBotEnabled() {
+        return getConfig().getBoolean("qq_bot.enable", true)
+                && getConfig().getBoolean("qq_bot.official-bot.enable", false);
+    }
+
+    /**
      * 状态卡片触发词。传统机器人与官方机器人各自独立配置：
      *   qq_bot.private-bot.card-cmd / qq_bot.official-bot.card-cmd
      * 兼容旧键 bot.card-cmd 与 bot.status_trigger。
@@ -97,7 +115,7 @@ public final class HeosFoliaPlugin extends JavaPlugin {
         a.put("mysql.url", "account-binder.mysql.url");
         a.put("mysql.user", "account-binder.mysql.user");
         a.put("mysql.password", "account-binder.mysql.password");
-        a.put("bot.enabled", "qq_bot.enable");
+        a.put("bot.enabled", "qq_bot.private-bot.enable");
         a.put("bot.host", "qq_bot.private-bot.host");
         a.put("bot.port", "qq_bot.private-bot.port");
         a.put("bot.access_token", "qq_bot.private-bot.access_token");
@@ -217,8 +235,8 @@ public final class HeosFoliaPlugin extends JavaPlugin {
                 this, banData, whitelistData, accountBinding, storage, whitelistRepository);
         bypassService.install();
 
-        // OneBot QQ bot
-        if (getConfig().getBoolean("bot.enabled", false)) {
+        // OneBot QQ bot：以 qq_bot.private-bot.enable 为准，兼容旧键 bot.enabled。
+        if (privateBotEnabled()) {
             String botHost = getConfig().getString("bot.host", "0.0.0.0");
             int botPort = getConfig().getInt("bot.port", 10100);
             String botToken = getConfig().getString("bot.access_token", "");
@@ -270,7 +288,7 @@ public final class HeosFoliaPlugin extends JavaPlugin {
             }
         }
 
-        if (getConfig().getBoolean("official_qq.enabled", false)) {
+        if (officialBotEnabled()) {
             try {
                 String smtpUser = getConfig().getString("official_qq.smtp.username", "");
                 SmtpCodeService smtp = new SmtpCodeService(
