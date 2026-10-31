@@ -7,12 +7,32 @@ import java.security.MessageDigest;
 import java.time.Duration;
 import java.util.*;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.TimeUnit;
 
 /** 官Q图片分片上传。不需要图床；预签名PUT绝不携带机器人密钥。 */
 public final class OfficialQQMedia {
     private static final int MAX_BYTES = 20 * 1024 * 1024;
     private static final Gson JSON = new Gson();
+    /**
+     * 整条上传链路的时间预算。必须小于调用方 45 秒兜底超时，
+     * 否则文字降级先发出去、图片随后又到达，会重复回复同一张卡片。
+     */
+    private static final long UPLOAD_BUDGET_NANOS = TimeUnit.SECONDS.toNanos(40);
+    private static final Duration PREPARE_TIMEOUT = Duration.ofSeconds(15);
+    private static final Duration PUT_TIMEOUT = Duration.ofSeconds(15);
+    private static final Duration FINISH_TIMEOUT = Duration.ofSeconds(10);
+    private static final Duration MERGE_TIMEOUT = Duration.ofSeconds(10);
+
     private OfficialQQMedia() {}
+
+    /** 上传阶段失败。阶段名必须进日志：只报 HttpTimeoutException 无法判断卡在 prepare/PUT/finish/files。 */
+    static final class StageFailure extends RuntimeException {
+        final String stage;
+        StageFailure(String stage, Throwable cause) {
+            super("阶段[" + stage + "]", cause);
+            this.stage = stage;
+        }
+    }
 
     public static CompletableFuture<String> upload(HttpClient http, String apiBase, String token,
                                                     String group, String file) {
@@ -27,6 +47,7 @@ public final class OfficialQQMedia {
             if (bytes.length > MAX_BYTES || (!png && !jpg)) throw new IllegalArgumentException("图片必须是PNG或JPEG");
             String path = apiBase.replaceAll("/$", "") + "/v2/groups/" + group;
             String name = png ? "status.png" : "status.jpg";
+            long deadline = System.nanoTime() + UPLOAD_BUDGET_NANOS;
             JsonObject request = new JsonObject();
             request.addProperty("file_type", 1);
             request.addProperty("file_name", name);
@@ -34,7 +55,8 @@ public final class OfficialQQMedia {
             request.addProperty("md5", digest("MD5", bytes));
             request.addProperty("sha1", digest("SHA-1", bytes));
             request.addProperty("md5_10m", digest("MD5", Arrays.copyOf(bytes, Math.min(bytes.length, 10002432))));
-            return post(http, path + "/upload_prepare", token, request).thenCompose(prepared -> {
+            return stage("upload_prepare", post(http, path + "/upload_prepare", token, request, PREPARE_TIMEOUT, deadline))
+                .thenCompose(prepared -> {
                 String uploadId = required(prepared, "upload_id");
                 int block = prepared.get("block_size").getAsInt();
                 JsonArray parts = prepared.getAsJsonArray("parts");
@@ -60,10 +82,12 @@ public final class OfficialQQMedia {
                     JsonObject part = sorted.get(i);
                     byte[] chunk = Arrays.copyOfRange(bytes, i * block, (int)Math.min(bytes.length, (long)(i + 1) * block));
                     chain = chain.thenCompose(ignored -> {
+                        String stage = "PUT part " + part.get("index").getAsInt();
                         HttpRequest put = HttpRequest.newBuilder(safePutUri(required(part, "presigned_url"), apiBase))
-                                .timeout(Duration.ofSeconds(20)).header("Content-Type", "application/octet-stream")
+                                .timeout(PUT_TIMEOUT).header("Content-Type", "application/octet-stream")
                                 .PUT(HttpRequest.BodyPublishers.ofByteArray(chunk)).build();
-                        return http.sendAsync(put, HttpResponse.BodyHandlers.discarding()).thenCompose(resp -> {
+                        return stage(stage, retrying(() -> http.sendAsync(put, HttpResponse.BodyHandlers.discarding()), deadline)
+                                .thenCompose(resp -> {
                             if (resp.statusCode() < 200 || resp.statusCode() >= 300)
                                 throw new IllegalStateException("图片分片上传失败 HTTP " + resp.statusCode());
                             JsonObject finish = new JsonObject();
@@ -71,8 +95,9 @@ public final class OfficialQQMedia {
                             finish.addProperty("part_index", part.get("index").getAsInt());
                             finish.addProperty("block_size", String.valueOf(chunk.length));
                             finish.addProperty("md5", digest("MD5", chunk));
-                            return post(http, path + "/upload_part_finish", token, finish).thenApply(r -> null);
-                        });
+                            return stage("upload_part_finish", post(http, path + "/upload_part_finish", token,
+                                    finish, FINISH_TIMEOUT, deadline)).thenApply(r -> null);
+                        }));
                     });
                 }
                 return chain.thenCompose(ignored -> {
@@ -81,17 +106,57 @@ public final class OfficialQQMedia {
                     merge.addProperty("srv_send_msg", false);
                     merge.addProperty("file_name", name);
                     merge.addProperty("upload_id", uploadId);
-                    return post(http, path + "/files", token, merge).thenApply(r -> required(r, "file_info"));
+                    return stage("files", post(http, path + "/files", token, merge, MERGE_TIMEOUT, deadline))
+                            .thenApply(r -> required(r, "file_info"));
                 });
             });
         } catch (Exception e) { return CompletableFuture.failedFuture(e); }
     }
 
-    static CompletableFuture<JsonObject> post(HttpClient http, String url, String token, JsonObject body) {
-        HttpRequest req = HttpRequest.newBuilder(URI.create(url)).timeout(Duration.ofSeconds(20))
+    /** 给失败加上阶段名，便于从线上日志定位到底卡在哪一步。 */
+    static <T> CompletableFuture<T> stage(String stage, CompletableFuture<T> future) {
+        return future.handle((value, error) -> {
+            if (error == null) return value;
+            Throwable cause = rootCause(error);
+            if (cause instanceof StageFailure failure) throw failure;
+            throw new StageFailure(stage, cause);
+        });
+    }
+
+    /**
+     * 网络类错误（超时、连接被重置、EOF）重试一次；HTTP 状态码/协议错误不重试。
+     * 重试前检查总预算，避免把整条链路拖到调用方兜底超时之后。
+     */
+    static <T> CompletableFuture<T> retrying(java.util.function.Supplier<CompletableFuture<T>> attempt, long deadlineNanos) {
+        return attempt.get().handle((value, error) -> {
+            if (error == null) return CompletableFuture.completedFuture(value);
+            Throwable cause = rootCause(error);
+            if (!transientFailure(cause) || System.nanoTime() >= deadlineNanos) {
+                return CompletableFuture.<T>failedFuture(cause);
+            }
+            return attempt.get();
+        }).thenCompose(future -> future);
+    }
+
+    private static boolean transientFailure(Throwable cause) {
+        return cause instanceof HttpTimeoutException
+                || cause instanceof java.net.ConnectException
+                || cause instanceof java.io.IOException
+                || cause instanceof java.util.concurrent.TimeoutException;
+    }
+
+    private static Throwable rootCause(Throwable error) {
+        Throwable cause = error;
+        while (cause.getCause() != null && cause.getCause() != cause) cause = cause.getCause();
+        return cause;
+    }
+
+    static CompletableFuture<JsonObject> post(HttpClient http, String url, String token, JsonObject body,
+                                              Duration timeout, long deadlineNanos) {
+        HttpRequest req = HttpRequest.newBuilder(URI.create(url)).timeout(timeout)
                 .header("Authorization", "QQBot " + token).header("Content-Type", "application/json")
                 .POST(HttpRequest.BodyPublishers.ofString(JSON.toJson(body))).build();
-        return http.sendAsync(req, HttpResponse.BodyHandlers.ofString()).thenApply(resp -> {
+        return retrying(() -> http.sendAsync(req, HttpResponse.BodyHandlers.ofString()), deadlineNanos).thenApply(resp -> {
             if (resp.statusCode() < 200 || resp.statusCode() >= 300)
                 throw new IllegalStateException("官方接口失败 HTTP " + resp.statusCode());
             JsonObject result = JsonParser.parseString(resp.body()).getAsJsonObject();

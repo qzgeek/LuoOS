@@ -87,6 +87,46 @@ public final class OfficialAdaptRegression {
             check(shouldReconnect(1006), "normal close retryable");
             pass("区分可重试与不可恢复错误码，避免无效重连");
 
+            // ---- 退避策略：限频(4008)不得 3 秒一轮，撞上限后不得永久放弃 ----
+            check(delayMillis(1006, 1) == 3000L, "normal first retry 3s");
+            check(delayMillis(1006, 3) == 12000L, "normal backoff grows");
+            check(delayMillis(4008, 1) >= 60_000L, "rate limited waits at least 60s");
+            check(delayMillis(4008, 5) >= 60_000L, "rate limited never falls back to 3s");
+            check(delayMillis(1006, 11) == 600_000L, "beyond cap uses slow retry, not permanent stop");
+            check(delayMillis(4008, 11) == 600_000L, "rate limited beyond cap also slow retries");
+            pass("限频长退避 + 超过上限改为慢速兜底（不再需要重启服务器）");
+
+            // ---- 限频后必须丢弃脏会话，重新 Identify 而不是无限 resume ----
+            check(mustDropSession(4008), "4008 drops session");
+            check(!mustDropSession(4009), "4009 keeps session for resume");
+            pass("4008 丢弃会话引用，避免反复 resume 被限频的会话");
+
+            // ---- READY/RESUMED 不再清零退避计数（限频死循环的根因）----
+            setField(bot, "reconnectAttempts", new java.util.concurrent.atomic.AtomicInteger(5));
+            gatewayEvent(bot, "RESUMED", new JsonObject());
+            check(attempts(bot) == 5, "RESUMED must not reset backoff, got " + attempts(bot));
+            gatewayEvent(bot, "READY", new JsonObject());
+            check(attempts(bot) == 5, "READY must not reset backoff, got " + attempts(bot));
+            pass("READY/RESUMED 不清零退避（刚连上就被踢不算成功）");
+
+            // ---- 只有存活够久的连接才清零 ----
+            setField(bot, "sessionEstablishedAt", System.currentTimeMillis() - 61_000L);
+            resetBackoff(bot);
+            check(attempts(bot) == 0, "healthy connection resets backoff");
+            setField(bot, "reconnectAttempts", new java.util.concurrent.atomic.AtomicInteger(5));
+            setField(bot, "sessionEstablishedAt", System.currentTimeMillis());
+            resetBackoff(bot);
+            check(attempts(bot) == 5, "short-lived connection keeps backoff");
+            pass("按连接存活时长（≥60s）判定是否清零退避");
+
+            // ---- 心跳任务不得累积：重复 Hello 必须取消上一条任务 ----
+            Object first = startHeartbeat(bot, 50L);
+            Object second = startHeartbeat(bot, 50L);
+            check(first != second, "heartbeat rescheduled");
+            check(((java.util.concurrent.ScheduledFuture<?>) first).isCancelled(), "previous heartbeat cancelled");
+            check(!((java.util.concurrent.ScheduledFuture<?>) second).isCancelled(), "current heartbeat active");
+            pass("重复 Hello 取消旧心跳任务，心跳数不随重连次数增长");
+
             System.out.println("ADAPT PASS " + passed);
         } finally {
             bot.stop();
@@ -130,5 +170,49 @@ public final class OfficialAdaptRegression {
         Field f = OfficialQQBot.class.getDeclaredField("sequence");
         f.setAccessible(true);
         ((java.util.concurrent.atomic.AtomicLong) f.get(bot)).set(value);
+    }
+
+    static long delayMillis(int closeCode, int attempt) throws Exception {
+        Method m = OfficialQQBot.class.getDeclaredMethod("reconnectDelayMillis", int.class, int.class);
+        m.setAccessible(true);
+        return (long) m.invoke(null, closeCode, attempt);
+    }
+
+    static boolean mustDropSession(int closeCode) throws Exception {
+        Method m = OfficialQQBot.class.getDeclaredMethod("mustDropSession", int.class);
+        m.setAccessible(true);
+        return (boolean) m.invoke(null, closeCode);
+    }
+
+    /** 直接投递一条网关事件（不经过 WebSocket）。 */
+    static void gatewayEvent(OfficialQQBot bot, String event, JsonObject data) throws Exception {
+        JsonObject payload = new JsonObject();
+        payload.addProperty("op", 0);
+        payload.addProperty("t", event);
+        payload.add("d", data);
+        Method m = OfficialQQBot.class.getDeclaredMethod("handleGatewayEvent", String.class, JsonObject.class);
+        m.setAccessible(true);
+        m.invoke(bot, event, payload);
+    }
+
+    static int attempts(OfficialQQBot bot) throws Exception {
+        Field f = OfficialQQBot.class.getDeclaredField("reconnectAttempts");
+        f.setAccessible(true);
+        return ((java.util.concurrent.atomic.AtomicInteger) f.get(bot)).get();
+    }
+
+    static void resetBackoff(OfficialQQBot bot) throws Exception {
+        Method m = OfficialQQBot.class.getDeclaredMethod("resetBackoffIfHealthy");
+        m.setAccessible(true);
+        m.invoke(bot);
+    }
+
+    static Object startHeartbeat(OfficialQQBot bot, long interval) throws Exception {
+        Method m = OfficialQQBot.class.getDeclaredMethod("startHeartbeat", long.class);
+        m.setAccessible(true);
+        m.invoke(bot, interval);
+        Field f = OfficialQQBot.class.getDeclaredField("heartbeatFuture");
+        f.setAccessible(true);
+        return f.get(bot);
     }
 }

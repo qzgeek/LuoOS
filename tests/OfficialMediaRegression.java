@@ -26,6 +26,7 @@ public final class OfficialMediaRegression {
         final String base;
         final String mode;
         final List<String> calls = new CopyOnWriteArrayList<>();
+        final Map<String, Integer> attempts = new ConcurrentHashMap<>();
         final List<Throwable> errors = new CopyOnWriteArrayList<>();
         Fixture(String mode) throws Exception {
             this.mode = mode;
@@ -36,6 +37,12 @@ public final class OfficialMediaRegression {
             base = "http://127.0.0.1:" + server.getAddress().getPort();
             server.createContext("/", exchange -> {
                 String path = exchange.getRequestURI().getPath(); calls.add(path);
+                int hit = attempts.merge(path, 1, Integer::sum);
+                // flaky: 第一次预上传直接断开连接（模拟网络超时/连接被重置），用于验证重试
+                if (mode.equals("flaky") && path.endsWith("/upload_prepare") && hit == 1) {
+                    exchange.close();
+                    return;
+                }
                 int code = 200; JsonObject reply = new JsonObject();
                 try {
                     byte[] bytes = exchange.getRequestBody().readAllBytes();
@@ -87,10 +94,9 @@ public final class OfficialMediaRegression {
         CompletableFuture<String> upload(String file) { return OfficialQQMedia.upload(HttpClient.newHttpClient(), base, "TEST_ONLY_TOKEN", "GROUP", file); }
         public void close() { server.stop(0); }
     }
-    static void failure(Fixture f, String input) throws Exception {
-        try { f.upload(input).get(5, TimeUnit.SECONDS); throw new AssertionError("expected failure"); }
-        catch (ExecutionException expected) {}
-        check(f.errors.isEmpty(), "mock contract errors: " + f.errors);
+    static Throwable failure(Fixture f, String input) throws Exception {
+        try { f.upload(input).get(8, TimeUnit.SECONDS); throw new AssertionError("expected failure"); }
+        catch (ExecutionException expected) { return expected.getCause(); }
     }
     public static void main(String[] args) throws Exception {
         try (Fixture f = new Fixture("ok")) {
@@ -108,6 +114,7 @@ public final class OfficialMediaRegression {
         for (String mode : List.of("prepare", "api-code", "index", "url", "put", "finish", "missing")) {
             try (Fixture f = new Fixture(mode)) {
                 failure(f, f.imageFile());
+                check(f.errors.isEmpty(), "mock contract errors: " + f.errors);
                 if (!mode.equals("missing")) check(f.calls.stream().noneMatch(p -> p.endsWith("/files")), "failure never merges");
                 if (List.of("prepare", "api-code", "index", "url").contains(mode)) check(f.calls.size() == 1, "invalid prepare never PUTs");
                 if (mode.equals("put")) check(f.calls.size() == 2, "failed PUT never finishes");
@@ -115,6 +122,27 @@ public final class OfficialMediaRegression {
                 pass("拒绝失败且停止后续请求: " + mode);
             }
         }
+        // 失败信息必须带上传阶段，否则线上只看到 HttpTimeoutException 无法定位卡在哪一步。
+        try (Fixture f = new Fixture("prepare")) {
+            String detail = OfficialQQBot.describe(failure(f, f.imageFile()));
+            check(detail.contains("upload_prepare"), "stage name missing: " + detail);
+            check(detail.contains("HTTP 500"), "root cause lost: " + detail);
+        }
+        try (Fixture f = new Fixture("put")) {
+            String detail = OfficialQQBot.describe(failure(f, f.imageFile()));
+            check(detail.contains("PUT part 0"), "PUT stage name missing: " + detail);
+        }
+        pass("失败信息带上传阶段与真实原因（prepare / PUT）");
+
+        // 网络类错误（连接被重置/超时）重试一次；协议错误不重试（见上面的失败模式断言）。
+        try (Fixture f = new Fixture("flaky")) {
+            check(f.upload(f.imageFile()).get(8, TimeUnit.SECONDS).equals("TEST_FILE_INFO"), "retry succeeds");
+            check(f.calls.equals(List.of("/v2/groups/GROUP/upload_prepare", "/v2/groups/GROUP/upload_prepare",
+                    "/put/0", "/v2/groups/GROUP/upload_part_finish", "/put/1", "/v2/groups/GROUP/upload_part_finish",
+                    "/v2/groups/GROUP/files")), "retry order " + f.calls);
+            check(f.errors.isEmpty(), "retry contract errors: " + f.errors);
+        }
+        pass("连接中断时自动重试一次并完成上传，HTTP 错误不重试");
         for (String file : List.of("file:///etc/passwd", "https://example.invalid/image.png", "base64://AA==", "base64://!")) {
             try (Fixture f = new Fixture("ok")) { failure(f, file); check(f.calls.isEmpty(), "invalid file never connects"); }
         }

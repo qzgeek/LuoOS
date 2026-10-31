@@ -72,6 +72,10 @@ public final class OfficialQQBot {
     private volatile long tokenExpiresAt;
     private volatile boolean stopping;
     private final java.util.concurrent.atomic.AtomicInteger reconnectAttempts = new java.util.concurrent.atomic.AtomicInteger();
+    /** 本连接收到 READY/RESUMED 的时刻，用于判定「健康连接」而非「刚连上就被踢」。 */
+    private volatile long sessionEstablishedAt;
+    /** 同一时刻只允许存在一条重连计划，避免 onClose/onError 重复触发导致并发重连链。 */
+    private final java.util.concurrent.atomic.AtomicBoolean reconnectScheduled = new java.util.concurrent.atomic.AtomicBoolean();
     private volatile java.util.concurrent.ScheduledFuture<?> heartbeatFuture;
     private final ScheduledExecutorService reconnectExecutor = Executors.newSingleThreadScheduledExecutor(r -> {
         Thread thread = new Thread(r, "LuoOS-Official-QQ-Reconnect");
@@ -83,6 +87,18 @@ public final class OfficialQQBot {
     private static final int MAX_RECONNECT_ATTEMPTS = 10;
     private static final long RECONNECT_BASE_MS = 3000L;
     private static final long RECONNECT_MAX_MS = 300000L;
+    /** 限频关闭码（官方 4008）：重连本身会继续触发限频，必须用长退避并丢弃脏会话。 */
+    static final int CLOSE_RATE_LIMITED = 4008;
+    /** 4008 的最小退避时间：3 秒重连会持续撞限频，实测可形成每天 2 万次的死循环。 */
+    static final long RATE_LIMIT_BACKOFF_MS = 60_000L;
+    /** 达到重连上限后的慢速兜底间隔，保证不会「必须重启服务器」才能恢复。 */
+    static final long SLOW_RETRY_MS = 600_000L;
+    /**
+     * 连接健康阈值：只有连接存活超过该时长，断线时才清零退避计数。
+     * 早期实现是在收到 READY/RESUMED 时清零，但限频场景是「连上→Resume→立刻 4008」，
+     * 每轮都被当成成功，退避永远停在 3 秒，重连上限形同虚设。
+     */
+    static final long HEALTHY_CONNECTION_MS = 60_000L;
     /** 令牌提前刷新余量：官方令牌约 2 小时有效，余量取 10 分钟。 */
     private static final long TOKEN_REFRESH_MARGIN_MS = 600_000L;
     /** 调试日志开关，由插件启动时注入。 */
@@ -117,13 +133,30 @@ public final class OfficialQQBot {
 
     public void stop() {
         stopping = true;
+        reconnectScheduled.set(false);
         commands.shutdownNow();
         reconnectExecutor.shutdownNow();
-        java.util.concurrent.ScheduledFuture<?> beat = heartbeatFuture;
-        if (beat != null) beat.cancel(false);
+        cancelHeartbeat();
         heartbeatExecutor.shutdownNow();
         WebSocketClient current = socket;
         if (current != null) current.close();
+    }
+
+    /** 启动心跳；重复调用会先取消上一条，避免每次重连累积一个永不取消的心跳任务。 */
+    void startHeartbeat(long interval) {
+        cancelHeartbeat();
+        heartbeatFuture = heartbeatExecutor.scheduleAtFixedRate(
+                this::sendHeartbeat, interval, interval, TimeUnit.MILLISECONDS);
+        if (debugLog) logger.info("[LuoOS-QQ] 心跳已启动，间隔 " + interval + "ms");
+    }
+
+    private void cancelHeartbeat() {
+        java.util.concurrent.ScheduledFuture<?> beat = heartbeatFuture;
+        if (beat != null) {
+            beat.cancel(false);
+            heartbeatFuture = null;
+            if (debugLog) logger.info("[LuoOS-QQ] 旧心跳任务已取消");
+        }
     }
 
     private String getToken() throws Exception {
@@ -170,6 +203,9 @@ public final class OfficialQQBot {
             }
             @Override public void onClose(int code, String reason, boolean remote) {
                 logger.warning("[LuoOS-QQ] Gateway disconnected: code=" + code + " reason=" + reason);
+                // 连接已断，心跳必须停：否则旧任务会继续往新连接上发心跳，越积越多。
+                cancelHeartbeat();
+                resetBackoffIfHealthy();
                 scheduleReconnect(code);
             }
             @Override public void onError(Exception ex) { logger.warning("[LuoOS-QQ] Gateway error: " + ex.getMessage()); }
@@ -194,20 +230,60 @@ public final class OfficialQQBot {
         return closeCode != 4914 && closeCode != 4915;
     }
 
+    /**
+     * 断线重连退避计算（纯函数，便于回归断言）。
+     * <ul>
+     *   <li>超过重连上限后不再永久放弃，改为 {@link #SLOW_RETRY_MS} 慢速兜底，
+     *       避免出现「必须重启服务器才能重新连接」。</li>
+     *   <li>4008（限频）无论第几次都至少等 {@link #RATE_LIMIT_BACKOFF_MS}，
+     *       3 秒一轮的重连本身就是限频的成因。</li>
+     * </ul>
+     */
+    static long reconnectDelayMillis(int closeCode, int attempt) {
+        if (attempt > MAX_RECONNECT_ATTEMPTS) return SLOW_RETRY_MS;
+        int steps = Math.max(0, Math.min(attempt - 1, 5));
+        long delay = Math.min(RECONNECT_BASE_MS * (1L << steps), RECONNECT_MAX_MS);
+        return closeCode == CLOSE_RATE_LIMITED ? Math.max(delay, RATE_LIMIT_BACKOFF_MS) : delay;
+    }
+
+    /** 限频后必须丢弃旧会话：被限频的会话继续 resume 会持续被拒，需要重新 Identify。 */
+    static boolean mustDropSession(int closeCode) {
+        return closeCode == CLOSE_RATE_LIMITED;
+    }
+
+    /** 只有存活够久的连接才清零退避；刚连上就被踢不算成功。 */
+    private void resetBackoffIfHealthy() {
+        long established = sessionEstablishedAt;
+        sessionEstablishedAt = 0L;
+        if (established > 0 && System.currentTimeMillis() - established >= HEALTHY_CONNECTION_MS) {
+            if (reconnectAttempts.get() > 0) {
+                logger.info("[LuoOS-QQ] 上一连接存活超过 " + (HEALTHY_CONNECTION_MS / 1000) + " 秒，重连计数已清零");
+            }
+            reconnectAttempts.set(0);
+        }
+    }
+
     private void scheduleReconnect(int closeCode) {
         if (stopping) return;
         if (!isRetryableClose(closeCode)) {
             logger.severe("[LuoOS-QQ] 网关返回不可恢复错误码 " + closeCode + "，已停止重连。请检查机器人状态或权限。");
             return;
         }
-        int attempt = reconnectAttempts.incrementAndGet();
-        if (attempt > MAX_RECONNECT_ATTEMPTS) {
-            logger.severe("[LuoOS-QQ] 连续重连 " + MAX_RECONNECT_ATTEMPTS + " 次仍失败，已停止。请检查网络或重新配置。");
-            return;
+        // 已经有一条重连计划在排队时不再叠加，否则多个 onClose 会各自拉起一条重连链。
+        if (!reconnectScheduled.compareAndSet(false, true)) return;
+        if (mustDropSession(closeCode)) {
+            sessionId = null;
+            sequence.set(-1);
         }
-        long delay = Math.min(RECONNECT_BASE_MS * (1L << Math.min(attempt - 1, 5)), RECONNECT_MAX_MS);
-        logger.info("[LuoOS-QQ] 将在 " + (delay / 1000) + " 秒后尝试第 " + attempt + " 次重连"
-                + (canResume() ? "（含会话恢复）" : ""));
+        int attempt = reconnectAttempts.incrementAndGet();
+        long delay = reconnectDelayMillis(closeCode, attempt);
+        if (attempt > MAX_RECONNECT_ATTEMPTS) {
+            logger.warning("[LuoOS-QQ] 连续重连 " + (attempt - 1) + " 次仍失败，改为每 "
+                    + (SLOW_RETRY_MS / 60_000L) + " 分钟慢速重试（无需重启服务器）");
+        } else {
+            logger.info("[LuoOS-QQ] 将在 " + (delay / 1000) + " 秒后尝试第 " + attempt + " 次重连"
+                    + (canResume() ? "（含会话恢复）" : "（重新鉴权）"));
+        }
         try {
             reconnectExecutor.schedule(this::doReconnect, delay, TimeUnit.MILLISECONDS);
         } catch (java.util.concurrent.RejectedExecutionException ignored) {
@@ -217,6 +293,7 @@ public final class OfficialQQBot {
 
     private void doReconnect() {
         if (stopping) return;
+        reconnectScheduled.set(false);
         try {
             // 访问令牌有效期有限，重连前确保令牌仍然可用
             if (tokenExpiresAt > 0 && System.currentTimeMillis() > tokenExpiresAt - TOKEN_REFRESH_MARGIN_MS) {
@@ -240,10 +317,10 @@ public final class OfficialQQBot {
         int op = payload.get("op").getAsInt();
         if (op == 10) {
             JsonObject d = payload.getAsJsonObject("d");
-            if (d.has("heartbeat_interval")) {
+            if (d != null && d.has("heartbeat_interval")) {
                 long interval = Math.max(1000L, d.get("heartbeat_interval").getAsLong());
-                heartbeatFuture = heartbeatExecutor.scheduleAtFixedRate(
-                        this::sendHeartbeat, interval, interval, TimeUnit.MILLISECONDS);
+                // 每次 Hello 都重建心跳，旧任务必须先取消（曾因不取消导致心跳数随重连线性膨胀）。
+                startHeartbeat(interval);
             }
             // 有可用会话时优先 resume：网关会补发断线期间遗漏的事件，避免漏处理命令
             if (canResume()) {
@@ -291,14 +368,16 @@ public final class OfficialQQBot {
     private void handleGatewayEvent(String event, JsonObject payload) {
         switch (event) {
             case "READY" -> {
-                reconnectAttempts.set(0);
+                // 注意：这里不再清零退避计数。限频循环里 READY/RESUMED 也会在 1 秒内出现，
+                // 用它当「成功」会让退避永远停在 3 秒。清零只发生在断线时按存活时长判定。
                 JsonObject d = payload.getAsJsonObject("d");
                 if (d != null && d.has("session_id")) sessionId = d.get("session_id").getAsString();
+                sessionEstablishedAt = System.currentTimeMillis();
                 logger.info("[LuoOS-QQ] 官方机器人鉴权成功，READY"
                         + (sessionId != null ? "（会话 " + sessionId.substring(0, Math.min(8, sessionId.length())) + "）" : ""));
             }
             case "RESUMED" -> {
-                reconnectAttempts.set(0);
+                sessionEstablishedAt = System.currentTimeMillis();
                 logger.info("[LuoOS-QQ] 会话已恢复，断线期间的事件已补发");
             }
             case "GROUP_AT_MESSAGE_CREATE", "C2C_MESSAGE_CREATE", "GROUP_MEMBER_ADD", "GROUP_MEMBER_REMOVE" ->
@@ -540,13 +619,23 @@ public final class OfficialQQBot {
         return result;
     }
 
-    /** 日志只保留错误类别，避免把平台URL或内容写进日志。 */
+    /**
+     * 日志只保留错误类别，避免把平台URL或内容写进日志。
+     * 上传失败还要带上阶段（prepare/PUT/finish/files），否则只看到 HttpTimeoutException 无从定位。
+     */
     static String describe(Throwable error) {
         Throwable cause = error;
-        while (cause.getCause() != null && cause.getCause() != cause) cause = cause.getCause();
+        String stage = null;
+        while (true) {
+            if (stage == null && cause instanceof OfficialQQMedia.StageFailure failure) stage = failure.stage;
+            if (cause.getCause() == null || cause.getCause() == cause) break;
+            cause = cause.getCause();
+        }
         String text = String.valueOf(cause.getMessage());
-        if (!text.matches("[\\p{IsHan}0-9A-Za-z _:，。、（）-]{1,120}")) return cause.getClass().getSimpleName() + "（平台返回内容已隐去）";
-        return cause.getClass().getSimpleName() + ": " + text;
+        String detail = text.matches("[\\p{IsHan}0-9A-Za-z _:，。、（）-]{1,120}")
+                ? cause.getClass().getSimpleName() + ": " + text
+                : cause.getClass().getSimpleName() + "（平台返回内容已隐去）";
+        return stage == null ? detail : "上传阶段[" + stage + "] " + detail;
     }
 
     private CompletableFuture<JsonObject> sendChecked(HttpRequest request) {
