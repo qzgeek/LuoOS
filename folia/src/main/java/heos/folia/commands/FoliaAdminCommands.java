@@ -119,6 +119,18 @@ public final class FoliaAdminCommands implements CommandExecutor, TabCompleter {
                 sender.sendMessage(ChatColor.GREEN + "已创建新的资源世界。");
                 yield true;
             }
+            case "resourcestatus" -> {
+                sender.sendMessage(ChatColor.GOLD + "=== 资源世界死亡不掉落实况 ===");
+                resourceWorldManager.reportKeepInventory(lines -> {
+                    for (String line : lines) {
+                        boolean ok = line.endsWith("keepInventory=true");
+                        sender.sendMessage((ok ? ChatColor.GREEN : ChatColor.RED) + "  " + line);
+                    }
+                    sender.sendMessage(ChatColor.GRAY + "三项都是 keepInventory=true 即已开启；"
+                            + "插件每 60 秒自动校正一次，不一致会写日志。");
+                });
+                yield true;
+            }
             case "testcard" -> {
                 if (!(plugin instanceof heos.folia.HeosFoliaPlugin hp)) {
                     sender.sendMessage(ChatColor.RED + "内部错误");
@@ -175,6 +187,7 @@ public final class FoliaAdminCommands implements CommandExecutor, TabCompleter {
             sender.sendMessage(ChatColor.WHITE + "/los migrate-authme <路径>" + ChatColor.GRAY + " - AuthMe迁移");
             sender.sendMessage(ChatColor.WHITE + "/los reload" + ChatColor.GRAY + " - 重载配置");
             sender.sendMessage(ChatColor.WHITE + "/los maintenance <on|off|status>" + ChatColor.GRAY + " - 维护模式");
+            sender.sendMessage(ChatColor.WHITE + "/los resourcestatus" + ChatColor.GRAY + " - 资源世界死亡不掉落状态");
             sender.sendMessage(ChatColor.WHITE + "/ban /ban-ip /unban /banlist" + ChatColor.GRAY + " - 封禁管理");
         }
     }
@@ -397,6 +410,7 @@ public final class FoliaAdminCommands implements CommandExecutor, TabCompleter {
                 subs.add("whitelist"); subs.add("migrate"); subs.add("migrate-authme"); subs.add("migrate-authme-tsv"); subs.add("reload");
                 subs.add("maintenance");
                 subs.add("statstop"); subs.add("papi_test");
+                subs.add("resourcerefresh"); subs.add("resourcecreate"); subs.add("resourcestatus");
             }
             return filter(subs, args[0]);
         }

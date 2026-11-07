@@ -267,6 +267,9 @@ public final class HeosFoliaPlugin extends JavaPlugin {
 
         // Resource world manager
         this.resourceWorldManager = new ResourceWorldManager(this);
+        // 资源世界死亡不掉落的事件层兜底（世界规则回退时也不掉）
+        getServer().getPluginManager().registerEvents(
+                new heos.folia.event.ResourceWorldDeathListener(resourceWorldManager, getLogger()), this);
 
         FoliaAdminCommands adminCommands = new FoliaAdminCommands(this, storage, whitelistData, whitelistRepository,
                 migrationCommands, authService, banCommands, bindCommands, resourceWorldManager, statsTracker);

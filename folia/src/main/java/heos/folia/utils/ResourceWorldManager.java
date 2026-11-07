@@ -60,14 +60,124 @@ public class ResourceWorldManager implements AutoCloseable {
     public long getNextRefreshTime() {
         return plugin.getConfig().getLong(CFG_NEXT, 0);
     }
-    // ========== Teleport ==========
+    // ========== KeepInventory ==========
 
-    /** Apply default gamerules to resource worlds (keepInventory, etc.). */
+    /**
+     * 收敛任务的周期（秒）。三个世界各读一次 GameRule，开销可以忽略，
+     * 用 60 秒是为了「玩家死亡时最多滞后一分钟」这个界足够小。
+     * 真正的硬保证在 ResourceWorldDeathListener（死亡事件层），这里只是把世界规则
+     * 拉回正确状态，让其它依赖规则的系统（经验、别的插件读 gamerule）也看到 true。
+     */
+    private static final long KEEP_INVENTORY_GUARD_SECONDS = 60L;
+
+    /** 任意线程可调用：把资源世界的 keepInventory 对齐为 true（内部转到全局区域线程）。 */
     private void applyResourceGamerules(World world) {
         if (world == null) return;
+        Bukkit.getGlobalRegionScheduler().run(plugin, task -> enforceKeepInventory(world, "世界就绪"));
+    }
+
+    /**
+     * 全局区域线程上执行：设置 keepInventory 并回读确认，失败重试一次，结果必须落日志。
+     *
+     * <p>为什么要回读：2026-10-25 生产服月度刷新时这段逻辑确实执行过，三个维度的
+     * {@code data/minecraft/game_rules.dat} 里 {@code minecraft:keep_inventory} 依然是 0。
+     * 只调 {@code setGameRule} 不看结果，等于默认它会成功——这就是「修过一次又复发」的
+     * 静默失败点。现在改为：写 → 读回 → 不符就重试 → 仍不符打 WARNING。</p>
+     */
+    private boolean enforceKeepInventory(World world, String reason) {
+        if (world == null) return false;
+        if (Boolean.TRUE.equals(readKeepInventory(world))) return true;
+
+        boolean accepted = false;
+        for (int attempt = 1; attempt <= 2; attempt++) {
+            try {
+                accepted = world.setGameRule(GameRules.KEEP_INVENTORY, true);
+            } catch (Throwable t) {
+                logger.warning("[ResourceWorld] 设置 " + world.getName() + " 的 keepInventory 抛异常（第 "
+                        + attempt + " 次）: " + t);
+            }
+            if (Boolean.TRUE.equals(readKeepInventory(world))) {
+                logger.info("[ResourceWorld] keepInventory=true 已生效: " + world.getName()
+                        + "（" + reason + "）");
+                return true;
+            }
+        }
+        logger.warning("[ResourceWorld] keepInventory 仍未生效: " + world.getName() + "（" + reason
+                + "，setGameRule 返回 " + accepted + "），下一轮收敛会重试");
+        return false;
+    }
+
+    /** 读回当前 keepInventory 值；读不到返回 null（不吞异常原因，交给调用方记录）。 */
+    private Boolean readKeepInventory(World world) {
+        try {
+            return world.getGameRuleValue(GameRules.KEEP_INVENTORY);
+        } catch (Throwable t) {
+            return null;
+        }
+    }
+
+    /**
+     * 全局区域线程上核对所有已加载的资源维度，有偏差立即纠正。
+     * 引用为空时顺手从 Bukkit 回填，避免「还没解析到世界」的窗口里漏掉。
+     */
+    private void enforceAllKeepInventory(String reason) {
+        if (resourceWorld == null) resourceWorld = findLoadedWorld(MAIN_KEY);
+        if (resourceNether == null) resourceNether = findLoadedWorld(NETHER_KEY);
+        if (resourceEnd == null) resourceEnd = findLoadedWorld(END_KEY);
+        enforceKeepInventory(resourceWorld, reason);
+        enforceKeepInventory(resourceNether, reason);
+        enforceKeepInventory(resourceEnd, reason);
+    }
+
+    /** 启动时挂上周期收敛任务；创建分支和重启分支都要挂，所以放在 start() 开头调用。 */
+    private void scheduleKeepInventoryGuard() {
+        Bukkit.getGlobalRegionScheduler().runAtFixedRate(plugin,
+                task -> enforceAllKeepInventory("周期收敛"),
+                KEEP_INVENTORY_GUARD_SECONDS * 20L, KEEP_INVENTORY_GUARD_SECONDS * 20L);
+    }
+
+    /** 该世界是否属于本插件创建的三个资源维度。 */
+    public boolean isResourceWorld(World world) {
+        if (world == null) return false;
+        if (world == resourceWorld || world == resourceNether || world == resourceEnd) return true;
+        try {
+            if (NAMESPACE.equals(world.getKey().getNamespace())) return true;
+        } catch (Throwable ignored) {
+            // getKey() 极端情况下不可用，退回按世界名判断
+        }
+        return isResourceWorldName(world.getName());
+    }
+
+    private static boolean isResourceWorldName(String name) {
+        if (name == null) return false;
+        String bare = name.contains(":") ? name.substring(name.indexOf(':') + 1) : name;
+        String[] keys = {MAIN_KEY, NETHER_KEY, END_KEY};
+        for (String key : keys) {
+            // 部分版本下 getName() 会把命名空间拼进世界名，例如 luoos_resource_res_world
+            if (key.equals(bare) || name.endsWith("_" + key)) return true;
+        }
+        return false;
+    }
+
+    /**
+     * 给 /los resourcestatus 用的实况快照：在全局区域线程上读取三个维度当前的
+     * keepInventory 值，再回调给调用方（回调也在全局区域线程执行）。
+     */
+    public void reportKeepInventory(java.util.function.Consumer<java.util.List<String>> sink) {
         Bukkit.getGlobalRegionScheduler().run(plugin, task -> {
-            world.setGameRule(GameRule.KEEP_INVENTORY, true);
-            logger.fine("[ResourceWorld] Gamerules applied to " + world.getName());
+            List<String> lines = new ArrayList<>();
+            World[] worlds = {resourceWorld, resourceNether, resourceEnd};
+            String[] names = {MAIN_KEY, NETHER_KEY, END_KEY};
+            for (int i = 0; i < worlds.length; i++) {
+                World world = worlds[i];
+                if (world == null) world = findLoadedWorld(names[i]);
+                if (world == null) {
+                    lines.add(names[i] + ": 未加载");
+                } else {
+                    lines.add(names[i] + " (" + world.getKey() + "): keepInventory=" + readKeepInventory(world));
+                }
+            }
+            sink.accept(lines);
         });
     }
 
@@ -171,9 +281,18 @@ public class ResourceWorldManager implements AutoCloseable {
 
         logger.info("[ResourceWorld] Creating with seed " + seedStr);
         try {
-            createOneWorld(MAIN_KEY, owDim, seed).get(60, TimeUnit.SECONDS);
-            if (nether) createOneWorld(NETHER_KEY, nDim, seed).get(60, TimeUnit.SECONDS);
-            if (end) createOneWorld(END_KEY, eDim, seed).get(60, TimeUnit.SECONDS);
+            // 同步路径以前既不保存世界引用、也不设 gamerule，
+            // 走这条路建出来的资源世界从来没有死亡不掉落。
+            resourceWorld = createOneWorld(MAIN_KEY, owDim, seed).get(60, TimeUnit.SECONDS);
+            applyResourceGamerules(resourceWorld);
+            if (nether) {
+                resourceNether = createOneWorld(NETHER_KEY, nDim, seed).get(60, TimeUnit.SECONDS);
+                applyResourceGamerules(resourceNether);
+            }
+            if (end) {
+                resourceEnd = createOneWorld(END_KEY, eDim, seed).get(60, TimeUnit.SECONDS);
+                applyResourceGamerules(resourceEnd);
+            }
             logger.info("[ResourceWorld] Worlds ready (seed: " + seedStr + ")");
         } catch (Exception e) {
             logger.severe("[ResourceWorld] Failed: " + e.getMessage());
@@ -187,6 +306,11 @@ public class ResourceWorldManager implements AutoCloseable {
             logger.warning("[ResourceWorld] Worlds plugin not found");
             return;
         }
+
+        // 无论走创建分支还是重启分支，都先挂上 keepInventory 收敛任务：
+        // 旧实现只在创建/刷新时设置规则，重启后走的是「解析已存在世界」分支，
+        // 于是磁盘上为 false 时死亡不掉落永久失效（2026-11 玩家报障的根因）。
+        scheduleKeepInventoryGuard();
 
         String seed = currentSeed();
         if (!worldExists()) {
@@ -232,6 +356,11 @@ public class ResourceWorldManager implements AutoCloseable {
 
         if (resourceWorld != null) {
             logger.info("[ResourceWorld] Resolved existing worlds (seed: " + currentSeed() + ")");
+            // 重启后必须重新对齐规则：磁盘上的值可能是 false（生产现状），
+            // 而旧实现这里什么都不做，等于让死亡不掉落永久失效。幂等，值已正确时不打日志。
+            applyResourceGamerules(resourceWorld);
+            applyResourceGamerules(resourceNether);
+            applyResourceGamerules(resourceEnd);
         } else {
             logger.warning("[ResourceWorld] Resource world not registered yet; requesting Worlds load");
             loadExistingWorlds();
