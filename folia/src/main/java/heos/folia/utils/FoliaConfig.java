@@ -71,6 +71,7 @@ public final class FoliaConfig {
         a.put("bot.reply_delay_min_ms", "qq_bot.private-bot.reply-delay-min-ms");
         a.put("bot.reply_delay_max_ms", "qq_bot.private-bot.reply-delay-max-ms");
         a.put("bot.debug_log", "qq_bot.private-bot.debug_log");
+        a.put("bot.freeze_on_group_leave", "qq_bot.freeze-on-group-leave");
         a.put("bot.allowed_id_chars", "account.allowed_id_chars");
         a.put("bot.max_id_length", "account.max_id_length");
         // 官方机器人

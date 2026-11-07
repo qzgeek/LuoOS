@@ -70,6 +70,18 @@ public final class OfficialAdaptRegression {
             check(events.isEmpty(), "unverified member ignored");
             pass("未验证成员的进退群不产生事件（无白名单可冻结）");
 
+            // ---- 关闭「退群冻结」开关后，退群不再冻结（2026-11 用户要求新增控制项）----
+            events.clear();
+            var lenient = new BotCommandHandler(log, new BotDb(log, repo), storage, repo, null,
+                    3, "a-zA-Z0-9_-", 16, new long[0], "t", 1000, 60, 0, 0);
+            lenient.setFreezeOnGroupLeave(false);
+            dispatchMember(bot, "GROUP_MEMBER_REMOVE", "MEMBER_OPENID");
+            check(events.size() == 1, "member remove still dispatched when freeze disabled");
+            lenient.handle(events.get(0));
+            check(repo.getWhitelistEntries(10001).stream().noneMatch(e -> e.frozen),
+                    "freeze disabled → whitelist not frozen");
+            pass("关闭退群冻结开关后不再冻结白名单");
+
             // ---- resume 决策 ----
             check(!canResume(bot), "no resume before session");
             setField(bot, "sessionId", "sess-123");

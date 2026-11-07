@@ -16,7 +16,8 @@ python3 tests/run-official-regressions.py
 | `OfficialBindingRegression` | 16 | 真实 Java + SQLite 身份安全：待验证分表、错误/过期/重放、并发抢占、数据库故障回滚、旧版归档、重启、失败原因区分 |
 | `OfficialMediaRegression` | 10 | 本地 HTTP 契约：prepare→PUT→finish→files 全链路、字节与校验和、预签名 PUT 不带机器人 Authorization、分片序号 0 或 1 两种真实格式、错误停止、非法输入拒绝 |
 | `CommandParityRegression` | 17 | 真实处理器/仓储/HTTP 适配：公开菜单、未验证权限拒绝、封禁解封、SQL 故障不报成功、数字游戏ID删除、重置密码分通道（官Q邮件／传统私聊）、表情保留、乱序回复隔离、重复投递、群哈希碰撞、@目标拒绝与缺目标提示 |
-| `OfficialAdaptRegression` | 5 | 群成员进退群→白名单冻结/恢复、未验证成员跳过、resume 条件判断、可重试错误码区分 |
+| `OfficialAdaptRegression` | 6 | 群成员进退群→白名单冻结/恢复、**关闭退群冻结开关后不再冻结**、未验证成员跳过、resume 条件判断、可重试错误码区分 |
+| `TokenRefreshRegression` | 10 | 访问凭证：取凭证日志带剩余有效期、临近过期时定时刷新、发送遇 401 自动刷新凭证并重试一次（第二次请求必须带新凭证） |
 | `HelpTextCheck` | 3 | 调用真实 `handleHelp` 抓取文本：官Q不得出现 `@QQ` 与「私聊发送」、必须含邮箱与绑定步骤；两条通道说明列按显示宽度对齐 |
 
 所有 QQ、OpenID、Token 均为测试夹具。HTTP 只监听 127.0.0.1；SMTP 是明确的测试替身。不联网到腾讯、不登录真实 QQ、不修改生产数据库。

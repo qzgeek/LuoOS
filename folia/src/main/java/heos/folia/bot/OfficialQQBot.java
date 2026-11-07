@@ -70,6 +70,8 @@ public final class OfficialQQBot {
     /** 会话 id 与事件序号：用于断线后 resume 补发遗漏事件。 */
     private volatile String sessionId;
     private volatile long tokenExpiresAt;
+    /** 最近一次凭证刷新失败的时刻：失败后 1 分钟内不再重试，避免定时任务刷屏。 */
+    private volatile long lastTokenFailureAt;
     private volatile boolean stopping;
     private final java.util.concurrent.atomic.AtomicInteger reconnectAttempts = new java.util.concurrent.atomic.AtomicInteger();
     /** 本连接收到 READY/RESUMED 的时刻，用于判定「健康连接」而非「刚连上就被踢」。 */
@@ -82,6 +84,20 @@ public final class OfficialQQBot {
         thread.setDaemon(true);
         return thread;
     });
+    /**
+     * 访问凭证定时检查线程。必须与心跳/重连分开：凭证刷新是阻塞 HTTP，
+     * 混在心跳线程里会拖慢心跳发送，进而被平台判超时。
+     */
+    private final ScheduledExecutorService tokenExecutor = Executors.newSingleThreadScheduledExecutor(r -> {
+        Thread thread = new Thread(r, "LuoOS-Official-QQ-Token");
+        thread.setDaemon(true);
+        return thread;
+    });
+    /**
+     * 凭证检查间隔。官方有效期 7200 秒，5 分钟检查一次远小于 10 分钟提前量。
+     * 没有这个定时器时，凭证只在启动/重连时刷新 —— 网关不断线就会静默 401（2026-11-07 实测）。
+     */
+    private static final long TOKEN_CHECK_INTERVAL_MS = 300_000L;
     private static final int INTENT_GROUP_AND_C2C = 1 << 25;
     private static final int INTENT_GROUP_MEMBER = 1 << 24;
     private static final int MAX_RECONNECT_ATTEMPTS = 10;
@@ -123,6 +139,8 @@ public final class OfficialQQBot {
 
     public void start() {
         repository.createOfficialBindingTable();
+        // 定时刷新必须先挂上：首次取凭证失败时也能靠它自愈，不必重启服务器。
+        startTokenRefreshLoop();
         try {
             token = getToken();
             connect(gatewayUrl == null || gatewayUrl.isBlank() ? discoverGateway() : gatewayUrl);
@@ -136,6 +154,7 @@ public final class OfficialQQBot {
         reconnectScheduled.set(false);
         commands.shutdownNow();
         reconnectExecutor.shutdownNow();
+        tokenExecutor.shutdownNow();
         cancelHeartbeat();
         heartbeatExecutor.shutdownNow();
         WebSocketClient current = socket;
@@ -177,9 +196,55 @@ public final class OfficialQQBot {
                     + "，code=" + code + "，message=" + message);
         }
         // 官方令牌默认约 2 小时有效；若响应带 expires_in 则按其计算，重连前据此刷新。
+        // 注意：有效期内重复获取会返回同一个值，此时 expires_in 是「剩余」时间而不是新的 7200，
+        // 所以启动时拿到的可能是别人几十分钟前签发、即将过期的凭证（2026-11-07 生产实测）。
         long expiresIn = result.has("expires_in") ? result.get("expires_in").getAsLong() : 7200L;
-        tokenExpiresAt = System.currentTimeMillis() + Math.max(60L, expiresIn) * 1000L;
+        long ttl = Math.max(60L, expiresIn);
+        tokenExpiresAt = System.currentTimeMillis() + ttl * 1000L;
+        logger.info("[LuoOS-QQ] 已获取访问凭证：剩余有效期 " + ttl + " 秒，过期时刻 "
+                + java.time.format.DateTimeFormatter.ofPattern("HH:mm:ss").format(
+                        java.time.LocalDateTime.ofInstant(java.time.Instant.ofEpochMilli(tokenExpiresAt),
+                                java.time.ZoneId.systemDefault())));
         return result.get("access_token").getAsString();
+    }
+
+    /**
+     * 凭证定时检查。官方文档明确要求开发者自行定时刷新，
+     * 而早期实现只在 start()/重连时刷新 —— 网关不断线时凭证过期后所有 HTTP 调用持续 401，
+     * 最长可静默坏到下一次断线重连（生产实测坏了 26 分钟）。
+     */
+    private void startTokenRefreshLoop() {
+        tokenExecutor.scheduleWithFixedDelay(() -> {
+            try {
+                refreshTokenIfDue("定时检查");
+            } catch (RuntimeException e) {
+                logger.warning("[LuoOS-QQ] 凭证定时检查异常: " + describe(e));
+            }
+        }, TOKEN_CHECK_INTERVAL_MS, TOKEN_CHECK_INTERVAL_MS, TimeUnit.MILLISECONDS);
+    }
+
+    /** 距过期不足提前量（或尚未取得凭证）时才刷新；失败后 1 分钟内不重复尝试，避免刷屏。 */
+    private void refreshTokenIfDue(String reason) {
+        long now = System.currentTimeMillis();
+        if (token != null && tokenExpiresAt > now + TOKEN_REFRESH_MARGIN_MS) return;
+        if (now - lastTokenFailureAt < 60_000L) return;
+        if (!refreshToken(reason)) lastTokenFailureAt = System.currentTimeMillis();
+    }
+
+    /**
+     * 刷新访问凭证。synchronized：定时任务、重连、401 重试三者共用，
+     * 避免并发换取（虽然平台在有效期内返回同值，但没必要重复发请求）。
+     */
+    private synchronized boolean refreshToken(String reason) {
+        try {
+            token = getToken();
+            logger.info("[LuoOS-QQ] 访问凭证已刷新（" + reason + "）");
+            return true;
+        } catch (Exception e) {
+            // 保留旧凭证：它可能仍然有效，置空只会让后续请求必然失败。
+            logger.warning("[LuoOS-QQ] 刷新访问凭证失败（" + reason + "）: " + describe(e));
+            return false;
+        }
     }
 
     private String discoverGateway() throws Exception {
@@ -295,10 +360,8 @@ public final class OfficialQQBot {
         if (stopping) return;
         reconnectScheduled.set(false);
         try {
-            // 访问令牌有效期有限，重连前确保令牌仍然可用
-            if (tokenExpiresAt > 0 && System.currentTimeMillis() > tokenExpiresAt - TOKEN_REFRESH_MARGIN_MS) {
-                token = getToken();
-            }
+            // 访问令牌有效期有限，重连前确保令牌仍然可用（失败后 1 分钟内不重复尝试）
+            refreshTokenIfDue("重连");
             String target = gateway == null || gateway.isBlank() ? discoverGateway() : gateway;
             connect(target);
         } catch (Exception e) {
@@ -573,7 +636,7 @@ public final class OfficialQQBot {
             if (image != null) {
                 final ReplyContext destination = target;
                 final String caption = text.toString();
-                return OfficialQQMedia.upload(http, apiBase, token, target.target, image)
+                return uploadImage(target.target, image, true)
                         .orTimeout(45, TimeUnit.SECONDS)
                         .thenCompose(info -> send(destination, caption, info).thenApply(outcome -> {
                             if (outcome.get("retcode").getAsInt() != 0)
@@ -583,6 +646,22 @@ public final class OfficialQQBot {
             }
             return send(target, text.toString(), null);
         } catch (RuntimeException e) { return failed("官方消息参数错误"); }
+    }
+
+    /**
+     * 图片上传（带 401 自愈）。预签名 PUT 不携带凭证，401 只会出现在
+     * upload_prepare / upload_part_finish / files 三个阶段；刷新凭证后整条链重跑一次。
+     * 平台未完成的上传会在 24 小时内由后台清理，重跑不会留下脏数据。
+     */
+    private CompletableFuture<String> uploadImage(String group, String image, boolean allowAuthRetry) {
+        return OfficialQQMedia.upload(http, apiBase, token, group, image)
+                .handle((info, error) -> {
+                    if (error == null) return CompletableFuture.completedFuture(info);
+                    if (allowAuthRetry && OfficialQQMedia.isUnauthorized(error) && refreshToken("401 重试")) {
+                        return uploadImage(group, image, false);
+                    }
+                    return CompletableFuture.<String>failedFuture(error);
+                }).thenCompose(future -> future);
     }
 
     private CompletableFuture<JsonObject> send(String group, String text, String messageId) {
@@ -602,11 +681,44 @@ public final class OfficialQQBot {
         if (fileInfo != null) {
             JsonObject media = new JsonObject(); media.addProperty("file_info", fileInfo); body.add("media", media);
         }
-        HttpRequest request = HttpRequest.newBuilder(URI.create(apiBase + "/v2/"
+        // 用工厂重建请求：401 刷新凭证后必须带上新的 Authorization 头，不能复用旧请求对象。
+        return sendChecked(() -> HttpRequest.newBuilder(URI.create(apiBase + "/v2/"
                         + (context.privateMessage ? "users/" : "groups/") + context.target + "/messages"))
-                .timeout(Duration.ofSeconds(8)).header("Authorization", "QQBot " + token).header("Content-Type", "application/json")
-                .POST(HttpRequest.BodyPublishers.ofString(gson.toJson(body))).build();
-        return sendChecked(request);
+                .timeout(Duration.ofSeconds(8)).header("Authorization", "QQBot " + token)
+                .header("Content-Type", "application/json")
+                .POST(HttpRequest.BodyPublishers.ofString(gson.toJson(body))).build(), true);
+    }
+
+    /**
+     * 发送并解析平台结果。遇 HTTP 401 时强制刷新凭证后整条请求重试一次：
+     * 凭证可能在网关不断线的情况下过期，没有这条自愈就只能等下一次重连，
+     * 期间玩家发出的每条命令都会静默失败（2026-11-07 生产实测）。
+     */
+    private CompletableFuture<JsonObject> sendChecked(java.util.function.Supplier<HttpRequest> requestFactory,
+                                                      boolean allowAuthRetry) {
+        return http.sendAsync(requestFactory.get(), HttpResponse.BodyHandlers.ofString())
+                .handle((response, error) -> {
+                    if (error == null && response.statusCode() == 401 && allowAuthRetry
+                            && refreshToken("401 重试")) {
+                        return sendChecked(requestFactory, false);
+                    }
+                    JsonObject result = new JsonObject();
+                    boolean success = false;
+                    int code = -1;
+                    if (error == null) {
+                        try {
+                            JsonObject body = gson.fromJson(response.body(), JsonObject.class);
+                            code = body != null && body.has("err_code") ? body.get("err_code").getAsInt()
+                                    : body != null && body.has("code") ? body.get("code").getAsInt() : 0;
+                            success = response.statusCode() == 200 && code == 0 && body != null && body.has("id");
+                        } catch (RuntimeException ignored) { code = -1; }
+                    }
+                    result.addProperty("status", success ? "ok" : "failed");
+                    result.addProperty("retcode", success ? 0 : code == 0 ? -1 : code);
+                    if (!success) logger.warning("[LuoOS-QQ] 消息发送失败，HTTP="
+                            + (response == null ? "network-error" : response.statusCode()) + "，code=" + code);
+                    return CompletableFuture.completedFuture(result);
+                }).thenCompose(future -> future);
     }
 
     private CompletableFuture<JsonObject> failed(String reason) {
@@ -636,27 +748,6 @@ public final class OfficialQQBot {
                 ? cause.getClass().getSimpleName() + ": " + text
                 : cause.getClass().getSimpleName() + "（平台返回内容已隐去）";
         return stage == null ? detail : "上传阶段[" + stage + "] " + detail;
-    }
-
-    private CompletableFuture<JsonObject> sendChecked(HttpRequest request) {
-        return http.sendAsync(request, HttpResponse.BodyHandlers.ofString()).handle((response, error) -> {
-            JsonObject result = new JsonObject();
-            boolean success = false;
-            int code = -1;
-            if (error == null) {
-                try {
-                    JsonObject body = gson.fromJson(response.body(), JsonObject.class);
-                    code = body != null && body.has("err_code") ? body.get("err_code").getAsInt()
-                            : body != null && body.has("code") ? body.get("code").getAsInt() : 0;
-                    success = response.statusCode() == 200 && code == 0 && body != null && body.has("id");
-                } catch (RuntimeException ignored) { code = -1; }
-            }
-            result.addProperty("status", success ? "ok" : "failed");
-            result.addProperty("retcode", success ? 0 : code == 0 ? -1 : code);
-            if (!success) logger.warning("[LuoOS-QQ] 消息发送失败，HTTP="
-                    + (response == null ? "network-error" : response.statusCode()) + "，code=" + code);
-            return result;
-        });
     }
 
     private void sendHeartbeat() {

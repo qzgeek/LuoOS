@@ -34,6 +34,22 @@ public final class OfficialQQMedia {
         }
     }
 
+    /** 访问凭证失效（HTTP 401）。单独成类，调用方据此刷新凭证后重试一次。 */
+    static final class Unauthorized extends RuntimeException {
+        Unauthorized(String message) { super(message); }
+    }
+
+    /** 失败链上是否含「凭证失效」。stage()/retrying() 会各包一层，必须遍历 cause 链。 */
+    static boolean isUnauthorized(Throwable error) {
+        Throwable cause = error;
+        while (cause != null) {
+            if (cause instanceof Unauthorized) return true;
+            if (cause.getCause() == cause) break;
+            cause = cause.getCause();
+        }
+        return false;
+    }
+
     public static CompletableFuture<String> upload(HttpClient http, String apiBase, String token,
                                                     String group, String file) {
         try {
@@ -157,6 +173,8 @@ public final class OfficialQQMedia {
                 .header("Authorization", "QQBot " + token).header("Content-Type", "application/json")
                 .POST(HttpRequest.BodyPublishers.ofString(JSON.toJson(body))).build();
         return retrying(() -> http.sendAsync(req, HttpResponse.BodyHandlers.ofString()), deadlineNanos).thenApply(resp -> {
+            // 401 必须与普通 HTTP 错误区分：它不是参数问题，而是凭证过期，刷新后重试有效。
+            if (resp.statusCode() == 401) throw new Unauthorized("官方接口 401（访问凭证失效）");
             if (resp.statusCode() < 200 || resp.statusCode() >= 300)
                 throw new IllegalStateException("官方接口失败 HTTP " + resp.statusCode());
             JsonObject result = JsonParser.parseString(resp.body()).getAsJsonObject();

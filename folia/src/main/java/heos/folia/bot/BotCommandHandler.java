@@ -49,6 +49,12 @@ public class BotCommandHandler {
 
     boolean debugLog = false;
     public void setDebugLog(boolean d) { this.debugLog = d; }
+    /**
+     * 成员退出/被移出 QQ 群时是否冻结其名下白名单。
+     * 默认开启（保持历史行为）；由插件按 qq_bot.freeze-on-group-leave 注入。
+     */
+    private boolean freezeOnGroupLeave = true;
+    public void setFreezeOnGroupLeave(boolean enabled) { this.freezeOnGroupLeave = enabled; }
     /** 邮件通道，用于把重置后的密码发送到用户QQ邮箱；未配置时拒绝改密。 */
     public void setMailService(SmtpCodeService service) { this.mail = service; }
 
@@ -270,8 +276,15 @@ public class BotCommandHandler {
         if ("group_decrease".equals(noticeType)) {
             // kick_me = the bot itself was removed — ignore
             if ("kick_me".equals(subType)) return;
+            if (!freezeOnGroupLeave) {
+                // 关闭时只跳过冻结；不动数据库、不踢人，也要留日志，避免被误判成「事件没收到」。
+                logger.info("[BotHandler] QQ" + targetQq + " 退群/被移出" + groupLabel(event, groupId)
+                        + " — 已按配置关闭「退群冻结白名单」，本次未冻结任何账号");
+                return;
+            }
             freezeQqWhitelist(targetQq, groupId, event);
         } else if ("group_increase".equals(noticeType)) {
+            // 恢复动作始终保留：历史上被冻结的账号仍需在重新进群时解冻。
             restoreQqWhitelist(targetQq, groupId, event);
         }
     }
