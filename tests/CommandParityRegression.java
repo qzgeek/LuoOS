@@ -153,6 +153,7 @@ public class CommandParityRegression {
             failing.sendPrivateThen(10001,"test", result -> { check(!result,"failed future false"); callbacks.incrementAndGet(); });
             check(callbacks.get() == 1, "callback once"); pass("私信异常也返回失败回调且只调用一次");
             transport(repo);
+            unbind(repo);
         } finally { storage.close(); }
         System.out.println("COMMAND/TRANSPORT PASS " + passed + " (isolated DB " + dir + ")");
     }
@@ -202,6 +203,77 @@ public class CommandParityRegression {
             JsonObject warning = requests.poll(3, TimeUnit.SECONDS);
             check(warning != null && warning.get("content").getAsString().contains("直接填写QQ号"), "mention rejected with guidance");
             pass("@目标拒绝并提示直接填写QQ号（官方不提供QQ号）");
+        } finally { bot.stop(); server.stop(0); }
+    }
+
+    /** 官Q 自助解绑：走真实 dispatchMessage → handleBinding → 仓储 → 本地 HTTP 回执，命令与文案都验。 */
+    static void unbind(FoliaWhitelistRepository repo) throws Exception {
+        BlockingQueue<JsonObject> requests = new LinkedBlockingQueue<>();
+        HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        server.createContext("/", ex -> {
+            JsonObject body = JsonParser.parseString(new String(ex.getRequestBody().readAllBytes(), StandardCharsets.UTF_8)).getAsJsonObject();
+            requests.add(body);
+            byte[] response = "{\"id\":\"TEST_RESPONSE\"}".getBytes(StandardCharsets.UTF_8);
+            ex.sendResponseHeaders(200, response.length); ex.getResponseBody().write(response); ex.close();
+        });
+        server.start();
+        String base = "http://127.0.0.1:" + server.getAddress().getPort();
+        AtomicReference<String> mailedCode = new AtomicReference<>();
+        // 明确的邮件替身：只截获验证码，不联网。
+        SmtpCodeService mail = new SmtpCodeService("127.0.0.1", 465, "", "", "", false) {
+            @Override public void send(String recipient, String code) { mailedCode.set(code); }
+            @Override public void sendUnbind(String recipient, String code) { mailedCode.set(code); }
+        };
+        List<OneBotEvent> events = new ArrayList<>();
+        OfficialQQBot bot = new OfficialQQBot(LOG, "TEST", "NOT_A_REAL_SECRET", base, base, "", repo, mail, 6, 10, Set.of(), events::add);
+        try {
+            var token = OfficialQQBot.class.getDeclaredField("token"); token.setAccessible(true); token.set(bot, "TEST_ONLY_TOKEN");
+            var dispatch = OfficialQQBot.class.getDeclaredMethod("dispatchMessage", JsonObject.class); dispatch.setAccessible(true);
+            String openid = "UNBIND_OPENID";
+            String bindCode = "654321";
+            String bindHash = Base64.getEncoder().encodeToString(
+                    java.security.MessageDigest.getInstance("SHA-256").digest(bindCode.getBytes(StandardCharsets.UTF_8)));
+            check(repo.requestOfficialCode(openid, 30001, bindHash, System.currentTimeMillis() + 600_000, () -> {}), "unbind fixture bind request");
+            check(repo.confirmOfficialCode(openid, bindHash, System.currentTimeMillis()), "unbind fixture bind confirm");
+
+            // 没有身份时解绑：明确拒绝，不发码
+            JsonObject stranger = message("UB0", "NOBODY_OPENID", "GROUP_U");
+            stranger.addProperty("content", "解绑QQ");
+            dispatch.invoke(bot, stranger);
+            JsonObject noIdentity = requests.poll(3, TimeUnit.SECONDS);
+            check(noIdentity != null && noIdentity.get("content").getAsString().contains("没有可解绑的QQ号"), "unbind without identity rejected");
+            check(mailedCode.get() == null, "no code mailed without identity");
+            pass("未绑定身份发「解绑QQ」被明确拒绝且不发邮件");
+
+            // 第一步：申请解绑 → 验证码发到已绑定 QQ 的邮箱，身份仍在
+            JsonObject request = message("UB1", openid, "GROUP_U");
+            request.addProperty("content", "解绑QQ");
+            dispatch.invoke(bot, request);
+            JsonObject sent = requests.poll(3, TimeUnit.SECONDS);
+            String sentText = sent == null ? "" : sent.get("content").getAsString();
+            check(sentText.contains("解绑验证码已发送到") && sentText.contains("30001@qq.com"), "unbind code sent to bound mailbox: " + sentText);
+            check(sentText.contains("解绑QQ") && !sentText.contains(mailedCode.get()), "reply shows usage without exposing code");
+            check(mailedCode.get() != null && mailedCode.get().length() == 6, "six-digit code captured");
+            check(repo.officialQq(openid).orElse(0L) == 30001L, "identity kept before code");
+            pass("「解绑QQ」把验证码发到已绑定QQ邮箱，且验证码通过前身份仍有效");
+
+            // 第二步：正确验证码 → 解绑成功、身份消失
+            JsonObject confirm = message("UB2", openid, "GROUP_U");
+            confirm.addProperty("content", "解绑QQ " + mailedCode.get());
+            dispatch.invoke(bot, confirm);
+            JsonObject done = requests.poll(3, TimeUnit.SECONDS);
+            String doneText = done == null ? "" : done.get("content").getAsString();
+            check(doneText.contains("解绑成功") && doneText.contains("30001"), "unbind success reply: " + doneText);
+            check(repo.officialQq(openid).isEmpty(), "identity removed after code");
+            pass("提交正确验证码后官Q身份解绑成功，回复不含验证码");
+
+            // 第三步：解绑后重放验证码不再生效（申请已消费）
+            JsonObject replay = message("UB3", openid, "GROUP_U");
+            replay.addProperty("content", "解绑QQ " + mailedCode.get());
+            dispatch.invoke(bot, replay);
+            JsonObject replayReply = requests.poll(3, TimeUnit.SECONDS);
+            check(replayReply != null && replayReply.get("content").getAsString().contains("解绑失败"), "replay rejected");
+            pass("解绑申请一次性消费，重放验证码无效");
         } finally { bot.stop(); server.stop(0); }
     }
 }

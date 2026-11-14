@@ -31,6 +31,11 @@ public class SmtpCodeService {
         deliver(recipient, "LuoOS QQ 绑定验证码", "验证码：" + code);
     }
 
+    /** 解绑验证码：单独主题，便于和绑定邮件区分。 */
+    public void sendUnbind(String recipient, String code) throws Exception {
+        deliver(recipient, "LuoOS QQ 解绑验证码", "验证码：" + code);
+    }
+
     /** 发送密码重置结果。密码只出现在邮件正文，不写日志。 */
     public void sendPasswordReset(String recipient, String accountName, String password) throws Exception {
         deliver(recipient, "LuoOS 密码重置",

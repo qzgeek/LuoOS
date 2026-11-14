@@ -291,6 +291,18 @@ public final class FoliaWhitelistRepository {
         return officialBindings.confirmCode(openid, codeHash, now);
     }
 
+    /** 申请解绑官Q身份（发码到已绑定 QQ 的邮箱），返回具体原因以便给出可读提示。 */
+    public OfficialBindingRepository.UnbindResult requestOfficialUnbindCode(String openid, long qq, String codeHash,
+                                                                           long expiresAt,
+                                                                           OfficialBindingRepository.MailDelivery delivery) {
+        return officialBindings.requestUnbindCode(openid, qq, codeHash, expiresAt, System.currentTimeMillis(), delivery);
+    }
+
+    /** 验证码通过后解绑官Q身份（身份行先归档再删除）。 */
+    public boolean confirmOfficialUnbind(String openid, String codeHash, long now) {
+        return officialBindings.confirmUnbind(openid, codeHash, now);
+    }
+
     public String blacklistReasonForPlayer(String playerName) {
         return query("blacklistReasonForPlayer", () -> {
             try (PreparedStatement ps = connection().prepareStatement(

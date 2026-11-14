@@ -66,12 +66,17 @@ public final class HelpTextCheck {
         check(official.contains("发到QQ邮箱"), "official states email delivery");
         check(!official.contains("私聊发送"), "official must not claim private-message delivery");
         check(official.contains("绑定QQ") && official.contains("验证码"), "official shows binding steps");
+        // 解绑必须出现在帮助里，否则玩家只能猜命令名
+        check(official.contains("解绑QQ"), "official documents self-service unbind");
 
         // 所有命令行必须对齐：说明列起始位置一致
         int officialCmdCol = columnOf(official, "申请白名单 <游戏ID>");
         int officialBanCol = columnOf(official, "封禁 <QQ号> [时长]");
         check(officialCmdCol == officialBanCol,
                 "official columns aligned: " + officialCmdCol + " vs " + officialBanCol);
+        int officialUnbindCol = columnOf(official, "解绑QQ");
+        check(officialUnbindCol == officialCmdCol,
+                "unbind line aligned: " + officialUnbindCol + " vs " + officialCmdCol);
 
         // 帮助不得出现被截断/拼接痕迹
         check(!official.contains("查看在线人机不能"), "no concatenation artifact");

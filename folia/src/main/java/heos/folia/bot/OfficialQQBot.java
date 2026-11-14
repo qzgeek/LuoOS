@@ -519,7 +519,7 @@ public final class OfficialQQBot {
         long groupId = groupIds.computeIfAbsent(group, ignored -> nextGroupId.getAndDecrement());
         ReplyContext context = remember(group, messageId, false);
         if (context == null) return; // 重复投递不得重复执行管理操作。
-        if (content.matches("^(验证码|绑定QQ)(\\s.*)?$")) {
+        if (content.matches("^(验证码|绑定QQ|解绑QQ)(\\s.*)?$")) {
             handleBinding(openid, group, messageId, content);
             return;
         }
@@ -597,6 +597,33 @@ public final class OfficialQQBot {
                 }
                 send(group, "验证码已发送到‘" + qq + "@qq.com’，" + expiresMinutes + "分钟内有效。接收到验证码后请@我发送‘验证码 " + code.replaceAll(".", "x") + "’以完成绑定", messageId);
             } catch (Exception e) { send(group, "绑定失败！原因：QQ号格式错误或邮件发送失败。", messageId); }
+        } else if (parts.length == 1 && "解绑QQ".equals(parts[0])) {
+            // 第一步：向「当前已绑定QQ」的邮箱发解绑验证码；没有身份或没有邮箱服务时不发码、不删任何东西。
+            long bound = repository.officialQq(openid).orElse(0L);
+            if (bound <= 0) { send(group, "解绑失败：当前身份尚未通过邮箱验证，没有可解绑的QQ号。如需绑定请发送：绑定QQ <QQ号>。", messageId); return; }
+            if (mail == null) { send(group, "解绑失败：服务器未配置邮箱服务，请联系管理员。", messageId); return; }
+            String code = randomCode();
+            var unbind = repository.requestOfficialUnbindCode(openid, bound, hash(code),
+                    System.currentTimeMillis() + expiresMinutes * 60_000L, () -> mail.sendUnbind(bound + "@qq.com", code));
+            if (unbind != heos.folia.storage.OfficialBindingRepository.UnbindResult.OK) {
+                String reason = switch (unbind) {
+                    case NOT_BOUND -> "当前身份没有可解绑的QQ号。";
+                    case RATE_LIMITED -> "请求过于频繁，请至少60秒后再试。";
+                    case MAIL_FAILED -> "验证码邮件发送失败，请联系管理员检查邮箱配置。";
+                    case STORAGE_FAILED -> "数据库写入失败，请稍后重试或联系管理员。";
+                    default -> "请求参数无效。";
+                };
+                send(group, "解绑申请失败：" + reason + " 本次未解除任何绑定。", messageId);
+                return;
+            }
+            send(group, "解绑验证码已发送到‘" + bound + "@qq.com’，" + expiresMinutes + "分钟内有效。接收到验证码后请@我发送‘解绑QQ " + code.replaceAll(".", "x") + "’以完成解绑。解绑后需重新邮箱验证才能使用账号命令。", messageId);
+        } else if (parts.length == 2 && "解绑QQ".equals(parts[0])) {
+            // 第二步：验证码通过才真正删除身份（身份行先归档）。
+            long bound = repository.officialQq(openid).orElse(0L);
+            if (repository.confirmOfficialUnbind(openid, hash(parts[1]), System.currentTimeMillis())) {
+                send(group, (bound > 0 ? "已解绑QQ号：" + bound + "。" : "")
+                        + "解绑成功！该QQ号与当前官方QQ身份的绑定已解除，游戏白名单记录不受影响。如需换绑，请发送：绑定QQ <新QQ号>，再提交邮箱验证码。", messageId);
+            } else send(group, "解绑失败！原因：验证码错误、过期、尝试次数已达上限、当前身份未绑定或数据库异常。", messageId);
         } else if (parts.length == 2 && "验证码".equals(parts[0])) {
             if (repository.confirmOfficialCode(openid, hash(parts[1]), System.currentTimeMillis())) {
                 repository.officialQq(openid).ifPresent(qq -> {

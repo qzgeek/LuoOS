@@ -196,7 +196,7 @@ public class BotCommandHandler {
 
         // 公开状态/菜单/人机列表不需要QQ身份；账号与管理命令必须验证。
         if (event.isOfficial() && (!event.officialIdentityVerified() || qq <= 0)) {
-            event.reply("尚未通过邮箱验证。请@机器人发送：绑定QQ <QQ号>，再发送：验证码 <邮箱验证码>。");
+            event.reply("尚未通过邮箱验证。请@机器人发送：绑定QQ <QQ号>，再发送：验证码 <邮箱验证码>。若已绑定但需要换号：发送「解绑QQ」，再提交邮箱验证码。");
             return;
         }
 
@@ -450,6 +450,7 @@ public class BotCommandHandler {
               .append("【玩家命令】\n")
               .append("   申请白名单 <游戏ID>   申请白名单\n")
               .append("   删除白名单 <游戏ID>   删除自己的白名单\n")
+              .append("   解绑QQ                解绑已绑定的QQ号（发码到QQ邮箱）\n")
               .append("   查询白名单            查看自己的白名单\n")
               .append("   查询白名单 <QQ号>     查看指定QQ的白名单\n")
               .append("   重置密码 <账号名>     重置密码（发到QQ邮箱）\n")

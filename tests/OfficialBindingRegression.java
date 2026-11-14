@@ -136,6 +136,49 @@ public final class OfficialBindingRegression {
             check(count(c,"qq_official_bindings")==2 && count(c,"qq_official_binding_archive")==1,"migration rollback no data loss");
             pass("migration failure rolls back all data changes and disables identity reads");
         }
+        try(Connection c=open(dir.resolve("unbind.db"))){
+            var u=repo(c);
+            // ① 没有身份就不能申请解绑（不发码、不写申请）
+            AtomicInteger unboundMails=new AtomicInteger();
+            check(u.requestUnbindCode("nobody",50001,"u0",now+600_000,now,unboundMails::incrementAndGet)==OfficialBindingRepository.UnbindResult.NOT_BOUND,"unbind without identity");
+            check(unboundMails.get()==0 && count(c,"qq_official_unbind_pending")==0,"no mail/state without identity");
+            pass("未绑定身份申请解绑被拒绝，且不发邮件不写申请");
+            // ② 绑定后申请解绑：先发码，身份仍在
+            check(request(u,"unbinder",50001,"bind1",now),"unbind setup bind");
+            check(u.confirmCode("unbinder","bind1",now),"unbind setup confirm");
+            check(u.requestUnbindCode("unbinder",50001,"u1",now+600_000,now,unboundMails::incrementAndGet)==OfficialBindingRepository.UnbindResult.OK,"unbind request");
+            check(unboundMails.get()==1 && u.officialQq("unbinder").orElseThrow()==50001,"identity kept until code");
+            check(count(c,"qq_official_unbind_pending")==1 && count(c,"qq_official_bindings")==1,"only challenge written");
+            pass("解绑申请只发码不删除身份（验证码通过前身份保持有效）");
+            // ③ 冷却：60 秒内重复申请被拒
+            check(u.requestUnbindCode("unbinder",50001,"u2",now+600_000,now+1,unboundMails::incrementAndGet)==OfficialBindingRepository.UnbindResult.RATE_LIMITED,"unbind cooldown");
+            check(unboundMails.get()==1,"no duplicate unbind mail");
+            pass("解绑申请有 60 秒冷却，不会重复发信");
+            // ④ 错误验证码不解绑
+            check(!u.confirmUnbind("unbinder","wrong",now),"wrong unbind code");
+            check(u.officialQq("unbinder").orElseThrow()==50001 && count(c,"qq_official_bindings")==1,"wrong code keeps identity");
+            pass("错误验证码不能解绑");
+            // ⑤ 正确验证码解绑：身份删除、归档留证、申请被消费
+            check(u.confirmUnbind("unbinder","u1",now),"correct unbind code");
+            check(u.officialQq("unbinder").isEmpty() && count(c,"qq_official_bindings")==0,"identity removed");
+            check(count(c,"qq_official_unbind_pending")==0 && count(c,"qq_official_binding_archive")==1,"challenge consumed + archived");
+            check(!u.bindingExistsForQq(50001),"qq released");
+            pass("验证码通过后解绑：身份先归档再删除，QQ 号释放");
+            // ⑥ 解绑后可以用另一个 QQ 重新绑定
+            check(u.requestCodeDetailed("unbinder",50002,"bind2",now+600_000,now+60_001,()->{})==OfficialBindingRepository.RequestResult.OK,"rebind other qq");
+            check(u.confirmCode("unbinder","bind2",now+60_002) && u.officialQq("unbinder").orElseThrow()==50002,"rebind confirmed");
+            pass("解绑后可用新 QQ 号重新绑定");
+            // ⑦ 解绑时邮件失败：不发码、不动身份
+            check(u.requestUnbindCode("unbinder",50002,"u3",now+600_000,now+180_000,()->{throw new Exception("simulated SMTP failure");})==OfficialBindingRepository.UnbindResult.MAIL_FAILED,"unbind mail failure");
+            check(count(c,"qq_official_unbind_pending")==0 && u.officialQq("unbinder").orElseThrow()==50002,"mail fail keeps identity");
+            pass("解绑验证码邮件失败时身份保持、无残留申请");
+            // ⑧ 归档失败则整体回滚：身份不丢
+            check(u.requestUnbindCode("unbinder",50002,"u4",now+600_000,now+240_000,()->{})==OfficialBindingRepository.UnbindResult.OK,"unbind rollback setup");
+            sql(c,"CREATE TRIGGER fail_unbind_archive BEFORE INSERT ON qq_official_binding_archive WHEN NEW.openid='unbinder' BEGIN SELECT RAISE(ABORT,'injected archive failure'); END");
+            check(!u.confirmUnbind("unbinder","u4",now+240_001) && u.officialQq("unbinder").orElseThrow()==50002 && c.getAutoCommit(),"archive fail rolls back");
+            sql(c,"DROP TRIGGER fail_unbind_archive");
+            pass("归档失败时解绑整体回滚，身份与事务状态均不损坏");
+        }
         Connection closed=open(dir.resolve("closed.db"));var r=repo(closed);closed.close();
         check(r.officialQq("x").isEmpty() && r.bindingExistsForQq(1),"db closed fail closed");
         check(!request(r,"x",40001,"h",now) && !r.confirmCode("x","h",now),"db closed writes fail");
