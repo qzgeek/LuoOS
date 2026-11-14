@@ -55,6 +55,17 @@ public class BotCommandHandler {
      */
     private boolean freezeOnGroupLeave = true;
     public void setFreezeOnGroupLeave(boolean enabled) { this.freezeOnGroupLeave = enabled; }
+    /**
+     * 加群自动回复：成员进群时机器人主动发一条欢迎 + 使用指引（可含「已恢复 N 个白名单账号」）。
+     * 官方通道成员事件没有 msg_id，走不带 msg_id 的主动消息接口（官方允许，带频控）。
+     */
+    private boolean joinReplyEnabled = true;
+    private String joinReplyMessage = "欢迎新成员加入！如需进服请先发送「绑定QQ <QQ号>」完成邮箱验证，"
+            + "再发送「申请白名单 <游戏ID>」；发送「帮助」查看全部命令。";
+    public void setJoinReply(boolean enabled, String message) {
+        this.joinReplyEnabled = enabled;
+        if (message != null && !message.isBlank()) this.joinReplyMessage = message;
+    }
     /** 邮件通道，用于把重置后的密码发送到用户QQ邮箱；未配置时拒绝改密。 */
     public void setMailService(SmtpCodeService service) { this.mail = service; }
 
@@ -285,7 +296,8 @@ public class BotCommandHandler {
             freezeQqWhitelist(targetQq, groupId, event);
         } else if ("group_increase".equals(noticeType)) {
             // 恢复动作始终保留：历史上被冻结的账号仍需在重新进群时解冻。
-            restoreQqWhitelist(targetQq, groupId, event);
+            int restored = restoreQqWhitelist(targetQq, groupId, event);
+            if (joinReplyEnabled) announceJoin(targetQq, restored, groupId, event);
         }
     }
 
@@ -325,22 +337,20 @@ public class BotCommandHandler {
             }
             logger.info("[BotHandler] QQ" + qq + " 退群/被移出" + groupLabel(event, groupId)
                     + " — 已冻结 " + n + " 个白名单账号");
-            // 官方通道的被动回复窗口只对触发事件生效，成员进退群无 msg_id，无法主动播报。
-            if (!event.isOfficial()) {
-                event.sendGroupMessage(groupId, "QQ" + qq + " 已退群/被移出群，其名下 " + n + " 个白名单账号已冻结，重新进群后自动恢复。");
-            }
+            // 成员事件没有 msg_id：官Q 走主动消息接口播报（官方带频控，失败只记日志），传统通道走 send_group_msg。
+            event.sendGroupAnnouncement("QQ" + qq + " 已退群/被移出群，其名下 " + n + " 个白名单账号已冻结，重新进群后自动恢复。");
         } catch (Exception e) {
             logger.warning("[BotHandler] freeze failed for QQ" + qq + ": " + e.getMessage());
         }
     }
 
-    /** Restore frozen whitelist entries of a QQ when it rejoins the group. */
-    private void restoreQqWhitelist(long qq, long groupId, OneBotEvent event) {
+    /** Restore frozen whitelist entries of a QQ when it rejoins the group. 返回解冻条数。 */
+    private int restoreQqWhitelist(long qq, long groupId, OneBotEvent event) {
         try {
             List<BotDb.WhitelistEntry> entries = botDb.getWhitelistEntries(qq);
             List<BotDb.WhitelistEntry> frozen = new ArrayList<>();
             for (BotDb.WhitelistEntry e : entries) if (e.frozen) frozen.add(e);
-            if (frozen.isEmpty()) return;
+            if (frozen.isEmpty()) return 0;
             // 同样先解冻数据库，再同步服务器白名单
             int n = botDb.unfreezeWhitelist(qq);
             try {
@@ -361,12 +371,20 @@ public class BotCommandHandler {
             }
             logger.info("[BotHandler] QQ" + qq + " 重新进群" + groupLabel(event, groupId)
                     + " — 已恢复 " + n + " 个白名单账号");
-            if (!event.isOfficial()) {
-                event.sendGroupMessage(groupId, "QQ" + qq + " 已重新进群，其名下 " + n + " 个白名单账号已恢复。");
-            }
+            // 播报合并进「加群自动回复」，避免同一次进群发两条消息。
+            return n;
         } catch (Exception e) {
             logger.warning("[BotHandler] restore failed for QQ" + qq + ": " + e.getMessage());
+            return 0;
         }
+    }
+
+    /** 加群自动回复：一条消息同时承担欢迎、使用指引与「恢复了哪些账号」的告知。 */
+    private void announceJoin(long qq, int restored, long groupId, OneBotEvent event) {
+        String text = joinReplyMessage.replace("{qq}", String.valueOf(qq));
+        if (restored > 0) text = text + "（已恢复其名下 " + restored + " 个白名单账号）";
+        event.sendGroupAnnouncement(text);
+        logger.info("[BotHandler] QQ" + qq + " 加入群" + groupLabel(event, groupId) + " — 已发送加群自动回复");
     }
 
     // ======================== Helpers ========================

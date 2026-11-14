@@ -326,6 +326,9 @@ public final class HeosFoliaPlugin extends JavaPlugin {
                 botHandler.setDebugLog(botDebug);
                 botHandler.setFreezeOnGroupLeave(
                         cfgBool("qq_bot.freeze-on-group-leave", "bot.freeze_on_group_leave", true));
+                botHandler.setJoinReply(
+                        cfgBool("qq_bot.join-reply.enable", "bot.join_reply_enable", true),
+                        cfgString("qq_bot.join-reply.message", "bot.join_reply_message", ""));
                 botHandler.setMailService(new SmtpCodeService(
                         cfgString("qq_bot.official-bot.smtp.host", "official_qq.smtp.host", defaultSmtpHost(cfgString("qq_bot.official-bot.smtp.username", "official_qq.smtp.username", ""))),
                         cfgInt("qq_bot.official-bot.smtp.port", "official_qq.smtp.port", 465),
@@ -373,6 +376,9 @@ public final class HeosFoliaPlugin extends JavaPlugin {
                 handler.setDebugLog(cfgBool("qq_bot.official-bot.debug_log", "official_qq.debug_log", false));
                 handler.setFreezeOnGroupLeave(
                         cfgBool("qq_bot.freeze-on-group-leave", "bot.freeze_on_group_leave", true));
+                handler.setJoinReply(
+                        cfgBool("qq_bot.join-reply.enable", "bot.join_reply_enable", true),
+                        cfgString("qq_bot.join-reply.message", "bot.join_reply_message", ""));
                 handler.setMailService(smtp);
                 officialQQBot = new OfficialQQBot(getLogger(), cfgString("qq_bot.official-bot.app_id", "official_qq.app_id", ""),
                         cfgString("qq_bot.official-bot.app_secret", "official_qq.app_secret", ""),

@@ -122,6 +122,19 @@ public class OneBotEvent {
                 + ",\"message\":[{\"type\":\"text\",\"data\":{\"text\":\"" + escape(message) + "\"}}]}");
     }
 
+    /**
+     * 群内主动播报（不依赖被动回复窗口）。
+     * 传统通道直接 send_group_msg；官方通道成员事件没有 msg_id，只能走主动消息接口，
+     * 因此这里只传文本，由传输层决定具体发法。
+     */
+    public void sendGroupAnnouncement(String message) {
+        if (isOfficial()) {
+            callApi("send_group_announcement", "{\"text\":\"" + escape(message) + "\"}");
+        } else {
+            sendGroupMessage(groupId(), message);
+        }
+    }
+
     /** Send a private message to an arbitrary QQ and report whether it was accepted (retcode == 0). */
     public boolean sendPrivateChecked(long targetQq, String message) {
         try {

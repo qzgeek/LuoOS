@@ -500,7 +500,37 @@ public final class OfficialQQBot {
         normalized.addProperty("user_id", qq);
         normalized.addProperty("official_verified", true);
         handler.accept(new OneBotEvent(normalized, "official:member",
-                (action, params) -> CompletableFuture.completedFuture(new JsonObject())));
+                (action, params) -> "send_group_announcement".equals(action)
+                        // 成员事件没有 msg_id：播报只能走主动消息，交给 announceToGroup。
+                        ? announceToGroup(group, params)
+                        : CompletableFuture.completedFuture(new JsonObject())));
+    }
+
+    /**
+     * 官方群主动消息：成员进退群事件不带 msg_id，无法走被动回复窗口，只能用不带 msg_id 的主动消息。
+     * 官方频控：Bot 维度 60 qpm（已认证）/ 30 qpm（未认证），单群每天最多接收 1000 条。
+     * 失败只记日志（如 40034105 主动消息无权限），不影响已经写库的冻结/恢复主流程。
+     */
+    private CompletableFuture<JsonObject> announceToGroup(String groupOpenid, String params) {
+        String text;
+        try {
+            text = gson.fromJson(params, JsonObject.class).get("text").getAsString();
+        } catch (RuntimeException e) {
+            return failed("播报参数无效");
+        }
+        if (text == null || text.isBlank()) return failed("不能发送空消息");
+        JsonObject body = new JsonObject();
+        body.addProperty("content", text);
+        body.addProperty("msg_type", 0);
+        return sendChecked(() -> HttpRequest.newBuilder(URI.create(apiBase + "/v2/groups/" + groupOpenid + "/messages"))
+                        .timeout(Duration.ofSeconds(8))
+                        .header("Authorization", "QQBot " + token)
+                        .header("Content-Type", "application/json")
+                        .POST(HttpRequest.BodyPublishers.ofString(gson.toJson(body))).build(), true)
+                .whenComplete((result, error) -> {
+                    if (error != null) logger.warning("[LuoOS-QQ] 群主动播报发送失败: " + error.getMessage());
+                    else if (result != null && result.has("code")) logger.warning("[LuoOS-QQ] 群主动播报被拒: " + result);
+                });
     }
 
     /** 群 openid 与内部群号的双向映射，复用消息路径的稳定编号。 */
@@ -621,13 +651,23 @@ public final class OfficialQQBot {
             // 第二步：验证码通过才真正删除身份（身份行先归档）。
             long bound = repository.officialQq(openid).orElse(0L);
             if (repository.confirmOfficialUnbind(openid, hash(parts[1]), System.currentTimeMillis())) {
-                send(group, (bound > 0 ? "已解绑QQ号：" + bound + "。" : "")
-                        + "解绑成功！该QQ号与当前官方QQ身份的绑定已解除，游戏白名单记录不受影响。如需换绑，请发送：绑定QQ <新QQ号>，再提交邮箱验证码。", messageId);
+                // 解绑即冻结该 QQ 名下白名单：身份不再可验证，登录依据必须同步收紧。
+                int frozen = bound > 0 ? repository.freezeWhitelist(bound) : 0;
+                if (frozen > 0) logger.info("[LuoOS-QQ] QQ" + bound + " 解绑官Q身份：已冻结 " + frozen
+                        + " 个白名单账号，重新绑定后自动解冻");
+                send(group, "解绑成功！" + (bound > 0 ? "已解绑QQ号：" + bound + "。" : "")
+                        + (frozen > 0 ? "其名下 " + frozen + " 个白名单账号已冻结，重新绑定后自动解冻。" : "")
+                        + "如需换绑，请发送：绑定QQ <新QQ号>，再提交邮箱验证码。", messageId);
             } else send(group, "解绑失败！原因：验证码错误、过期、尝试次数已达上限、当前身份未绑定或数据库异常。", messageId);
         } else if (parts.length == 2 && "验证码".equals(parts[0])) {
             if (repository.confirmOfficialCode(openid, hash(parts[1]), System.currentTimeMillis())) {
                 repository.officialQq(openid).ifPresent(qq -> {
-                    send(group, "绑定成功！您绑定的QQ号：" + qq + "，现在您可以进行申请白名单等操作了。", messageId);
+                    // 重新绑定成功 = 邮箱所有权再次被证明：解冻该 QQ 名下白名单。
+                    // 该路径只能由群内消息触发，因此不存在「已退群却被解冻」的情况。
+                    int thawed = repository.unfreezeWhitelist(qq);
+                    if (thawed > 0) logger.info("[LuoOS-QQ] QQ" + qq + " 绑定成功：已解冻 " + thawed + " 个白名单账号");
+                    send(group, "绑定成功！您绑定的QQ号：" + qq + "，现在您可以进行申请白名单等操作了。"
+                            + (thawed > 0 ? "其名下 " + thawed + " 个白名单账号已自动解冻。" : ""), messageId);
                 });
             } else send(group, "绑定失败！原因：验证码错误、过期、尝试次数已达上限、身份冲突或数据库异常。", messageId);
         } else {

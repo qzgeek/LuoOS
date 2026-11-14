@@ -153,7 +153,8 @@ public class CommandParityRegression {
             failing.sendPrivateThen(10001,"test", result -> { check(!result,"failed future false"); callbacks.incrementAndGet(); });
             check(callbacks.get() == 1, "callback once"); pass("私信异常也返回失败回调且只调用一次");
             transport(repo);
-            unbind(repo);
+            unbind(repo, storage);
+            memberLifecycle(repo, handler);
         } finally { storage.close(); }
         System.out.println("COMMAND/TRANSPORT PASS " + passed + " (isolated DB " + dir + ")");
     }
@@ -206,8 +207,79 @@ public class CommandParityRegression {
         } finally { bot.stop(); server.stop(0); }
     }
 
+    /** 白名单某账号是否处于冻结（frozen=1）。 */
+    static boolean entryFrozen(FoliaWhitelistRepository repo, long qq, String playerName) {
+        for (var e : repo.getWhitelistEntries(qq)) {
+            if (e.playerName.equalsIgnoreCase(playerName)) return e.frozen;
+        }
+        throw new AssertionError("白名单记录不存在: " + qq + " -> " + playerName);
+    }
+
+    /**
+     * 成员进退群：官Q 无 msg_id，必须用主动消息播报；加群自动回复、退群冻结、回群解冻三条一起验。
+     * 全程走真实 dispatchMemberChange → OneBotEvent → BotCommandHandler → 仓储 → 本地 HTTP。
+     */
+    static void memberLifecycle(FoliaWhitelistRepository repo, BotCommandHandler handler) throws Exception {
+        BlockingQueue<JsonObject> requests = new LinkedBlockingQueue<>();
+        HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        server.createContext("/", ex -> {
+            JsonObject body = JsonParser.parseString(new String(ex.getRequestBody().readAllBytes(), StandardCharsets.UTF_8)).getAsJsonObject();
+            requests.add(body);
+            byte[] response = "{\"id\":\"TEST_RESPONSE\"}".getBytes(StandardCharsets.UTF_8);
+            ex.sendResponseHeaders(200, response.length); ex.getResponseBody().write(response); ex.close();
+        });
+        server.start();
+        String base = "http://127.0.0.1:" + server.getAddress().getPort();
+        OfficialQQBot bot = new OfficialQQBot(LOG, "TEST", "NOT_A_REAL_SECRET", base, base, "", repo, null,
+                6, 10, Set.of(), handler::handle);
+        try {
+            var token = OfficialQQBot.class.getDeclaredField("token"); token.setAccessible(true); token.set(bot, "TEST_ONLY_TOKEN");
+            String openid = "MEMBER_OPENID";
+            long qq = 31001;
+            String bindHash = Base64.getEncoder().encodeToString(
+                    java.security.MessageDigest.getInstance("SHA-256").digest("member0001".getBytes(StandardCharsets.UTF_8)));
+            check(repo.requestOfficialCode(openid, qq, bindHash, System.currentTimeMillis() + 600_000, () -> {}), "member fixture bind");
+            check(repo.confirmOfficialCode(openid, bindHash, System.currentTimeMillis()), "member fixture confirm");
+            check(repo.addWhitelist(qq, "LifecycleUser", null), "member fixture whitelist");
+
+            // ① 加群：自动回复（主动消息，无 msg_id）
+            dispatchMember(bot, false, openid);
+            JsonObject join = requests.poll(5, TimeUnit.SECONDS);
+            String joinText = join == null ? "" : join.get("content").getAsString();
+            check(join != null && joinText.contains("欢迎") && joinText.contains("绑定QQ"), "join auto reply: " + joinText);
+            check(!join.has("msg_id") && !join.has("msg_seq"), "proactive notice has no msg_id/msg_seq");
+            check(join.get("msg_type").getAsInt() == 0, "proactive notice is text msg_type 0");
+            pass("加群自动回复：官Q 用无 msg_id 的主动消息发出欢迎与进服指引");
+
+            // ② 退群：冻结 + 播报
+            dispatchMember(bot, true, openid);
+            JsonObject leave = requests.poll(5, TimeUnit.SECONDS);
+            String leaveText = leave == null ? "" : leave.get("content").getAsString();
+            check(leaveText.contains("已冻结"), "leave broadcast: " + leaveText);
+            check(entryFrozen(repo, qq, "LifecycleUser"), "whitelist frozen on group leave");
+            pass("退群自动冻结白名单并主动播报冻结条数");
+
+            // ③ 重新进群：自动解冻，且恢复数量合并进同一条自动回复
+            dispatchMember(bot, false, openid);
+            JsonObject rejoin = requests.poll(5, TimeUnit.SECONDS);
+            String rejoinText = rejoin == null ? "" : rejoin.get("content").getAsString();
+            check(rejoinText.contains("欢迎") && rejoinText.contains("已恢复"), "rejoin announce: " + rejoinText);
+            check(!entryFrozen(repo, qq, "LifecycleUser"), "whitelist restored on rejoin");
+            pass("重新进群自动解冻白名单，恢复条数合并进加群自动回复（不再发两条）");
+        } finally { bot.stop(); server.stop(0); }
+    }
+
+    static void dispatchMember(OfficialQQBot bot, boolean left, String openid) throws Exception {
+        JsonObject data = new JsonObject();
+        data.addProperty("group_openid", "GROUP_X");
+        data.addProperty("member_openid", openid);
+        java.lang.reflect.Method m = OfficialQQBot.class.getDeclaredMethod("dispatchMemberChange", JsonObject.class, boolean.class);
+        m.setAccessible(true);
+        m.invoke(bot, data, left);
+    }
+
     /** 官Q 自助解绑：走真实 dispatchMessage → handleBinding → 仓储 → 本地 HTTP 回执，命令与文案都验。 */
-    static void unbind(FoliaWhitelistRepository repo) throws Exception {
+    static void unbind(FoliaWhitelistRepository repo, FoliaStorage storage) throws Exception {
         BlockingQueue<JsonObject> requests = new LinkedBlockingQueue<>();
         HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
         server.createContext("/", ex -> {
@@ -235,6 +307,7 @@ public class CommandParityRegression {
                     java.security.MessageDigest.getInstance("SHA-256").digest(bindCode.getBytes(StandardCharsets.UTF_8)));
             check(repo.requestOfficialCode(openid, 30001, bindHash, System.currentTimeMillis() + 600_000, () -> {}), "unbind fixture bind request");
             check(repo.confirmOfficialCode(openid, bindHash, System.currentTimeMillis()), "unbind fixture bind confirm");
+            check(repo.addWhitelist(30001, "UnbindUser", null), "unbind fixture whitelist");
 
             // 没有身份时解绑：明确拒绝，不发码
             JsonObject stranger = message("UB0", "NOBODY_OPENID", "GROUP_U");
@@ -265,7 +338,10 @@ public class CommandParityRegression {
             String doneText = done == null ? "" : done.get("content").getAsString();
             check(doneText.contains("解绑成功") && doneText.contains("30001"), "unbind success reply: " + doneText);
             check(repo.officialQq(openid).isEmpty(), "identity removed after code");
-            pass("提交正确验证码后官Q身份解绑成功，回复不含验证码");
+            // 解绑必须同时冻结该 QQ 名下白名单：身份不可再验证，登录依据必须收紧
+            check(entryFrozen(repo, 30001, "UnbindUser"), "whitelist frozen on unbind");
+            check(doneText.contains("已冻结"), "unbind reply states freeze: " + doneText);
+            pass("提交正确验证码后官Q身份解绑成功，并自动冻结该QQ名下白名单");
 
             // 第三步：解绑后重放验证码不再生效（申请已消费）
             JsonObject replay = message("UB3", openid, "GROUP_U");
@@ -274,6 +350,25 @@ public class CommandParityRegression {
             JsonObject replayReply = requests.poll(3, TimeUnit.SECONDS);
             check(replayReply != null && replayReply.get("content").getAsString().contains("解绑失败"), "replay rejected");
             pass("解绑申请一次性消费，重放验证码无效");
+
+            // 重新绑定同一个 QQ → 自动解冻（夹具里把 60 秒冷却清零，模拟冷却已过）
+            try (var st = storage.getConnection().createStatement()) {
+                st.executeUpdate("UPDATE qq_official_request_limits SET next_at = 0");
+            }
+            mailedCode.set(null);
+            JsonObject rebind = message("UB4", openid, "GROUP_U");
+            rebind.addProperty("content", "绑定QQ 30001");
+            dispatch.invoke(bot, rebind);
+            JsonObject rebindSent = requests.poll(3, TimeUnit.SECONDS);
+            check(rebindSent != null && mailedCode.get() != null, "rebind code mailed: " + rebindSent);
+            JsonObject rebindConfirm = message("UB5", openid, "GROUP_U");
+            rebindConfirm.addProperty("content", "验证码 " + mailedCode.get());
+            dispatch.invoke(bot, rebindConfirm);
+            JsonObject rebindDone = requests.poll(3, TimeUnit.SECONDS);
+            String rebindText = rebindDone == null ? "" : rebindDone.get("content").getAsString();
+            check(rebindText.contains("绑定成功") && rebindText.contains("已自动解冻"), "rebind reply: " + rebindText);
+            check(!entryFrozen(repo, 30001, "UnbindUser"), "whitelist unfrozen after rebind");
+            pass("重新绑定同一QQ号后白名单自动解冻，并在回复里告知条数");
         } finally { bot.stop(); server.stop(0); }
     }
 }
