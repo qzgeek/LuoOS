@@ -84,6 +84,33 @@ public class ResourceWorldManager implements AutoCloseable {
      * 只调 {@code setGameRule} 不看结果，等于默认它会成功——这就是「修过一次又复发」的
      * 静默失败点。现在改为：写 → 读回 → 不符就重试 → 仍不符打 WARNING。</p>
      */
+    /**
+     * keepInventory 规则引用（多版本构建的安全取法）。
+     *
+     * <p>本项目用 Stonecutter 同时编译 1.20.1 … 26.1.2；新版 org.bukkit.GameRules
+     * 在 1.20.1 的 API 里并不存在，直接引用会让 {@code :folia:1.20.1:compileJava} 编译失败
+     * （GitHub Actions 实测 2 处 cannot find symbol）。{@code org.bukkit.GameRule.KEEP_INVENTORY}
+     * 在所有目标版本里都存在（新版标为 deprecated for removal，编译只有告警），
+     * 因此统一用它；等最低支持版本提到 1.21.11 以上再换回 {@code GameRules}。</p>
+     */
+    private static final org.bukkit.GameRule<Boolean> KEEP_INVENTORY_RULE = resolveKeepInventoryRule();
+
+    /**
+     * 优先用新版 org.bukkit.GameRules.KEEP_INVENTORY（生产 26.1.2 走这条，行为与修复前完全一致）；
+     * 旧版 API（1.20.1 等）没有 GameRules，反射取不到就回退到 org.bukkit.GameRule.KEEP_INVENTORY。
+     * 用反射是为了让同一份源码在 Stonecutter 的所有目标版本上都能编译，而不是在低版本上直接引用不存在的类。
+     */
+    @SuppressWarnings({"unchecked", "removal"})
+    private static org.bukkit.GameRule<Boolean> resolveKeepInventoryRule() {
+        try {
+            Object rule = Class.forName("org.bukkit.GameRules").getField("KEEP_INVENTORY").get(null);
+            if (rule instanceof org.bukkit.GameRule<?> typed) return (org.bukkit.GameRule<Boolean>) typed;
+        } catch (Throwable ignored) {
+            // 旧版 API 或注册表尚未就绪：回退到通用常量。
+        }
+        return org.bukkit.GameRule.KEEP_INVENTORY;
+    }
+
     private boolean enforceKeepInventory(World world, String reason) {
         if (world == null) return false;
         if (Boolean.TRUE.equals(readKeepInventory(world))) return true;
@@ -91,7 +118,7 @@ public class ResourceWorldManager implements AutoCloseable {
         boolean accepted = false;
         for (int attempt = 1; attempt <= 2; attempt++) {
             try {
-                accepted = world.setGameRule(GameRules.KEEP_INVENTORY, true);
+                accepted = world.setGameRule(KEEP_INVENTORY_RULE, true);
             } catch (Throwable t) {
                 logger.warning("[ResourceWorld] 设置 " + world.getName() + " 的 keepInventory 抛异常（第 "
                         + attempt + " 次）: " + t);
@@ -110,7 +137,7 @@ public class ResourceWorldManager implements AutoCloseable {
     /** 读回当前 keepInventory 值；读不到返回 null（不吞异常原因，交给调用方记录）。 */
     private Boolean readKeepInventory(World world) {
         try {
-            return world.getGameRuleValue(GameRules.KEEP_INVENTORY);
+            return world.getGameRuleValue(KEEP_INVENTORY_RULE);
         } catch (Throwable t) {
             return null;
         }
